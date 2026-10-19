@@ -46,10 +46,68 @@ Throughput is reported the way the paper reports it: tokens / mean elapsed time 
 repeats. Averaging steps/s per run is biased upward for `restart`, whose completion
 time is heavy-tailed.
 
+## Reproducing
+
+```
+pip install -r requirements.txt
+python -m churnsim.calibrate --seeds 30 --json out/calibration.json   # ~35 s
+python -m churnsim.sweep --seeds 30                                    # ~25 s
+```
+
+`out/calibration.json` holds the fitted parameters and the sim-vs-paper cells;
+`out/sweep.csv` and `out/throughput_vs_failure.png` are the sweep.
+
+## Results (2026-10-19)
+
+Base costs from the p = 0 columns (not fitted): restart hop 14.4 ms, Algorithm 1 hop
+21.7 ms (the paper notes its implementation is less mature), both growing ~3 µs per
+cached token; cache-less 42.7 ms + 0.465 ms per prefix token per hop.
+
+Fitted failure costs: restart reconnect 3.0 s (whole chain re-opened), replay
+reconnect 6.0 s plus 5 ms per replayed token for one stage, cache-less ~0.
+
+| strategy  | T    |      | p=0   | 1e-4  | 1e-3  | 1e-2  |
+|-----------|------|------|-------|-------|-------|-------|
+| restart   | 128  | sim  | 17.10 | 14.75 | 11.30 | 0.19  |
+|           |      | paper| 17.10 | 16.70 | 12.00 | 0.18  |
+| restart   | 1024 | sim  | 15.50 | 11.50 | 0.79  | DNF   |
+|           |      | paper| 15.50 | 11.80 | 0.48  | DNF   |
+| cacheless | 128  | sim  | 3.44  | 3.44  | 3.44  | 3.41  |
+|           |      | paper| 3.44  | 3.44  | 3.44  | 3.44  |
+| cacheless | 1024 | sim  | 0.89  | 0.89  | 0.89  | 0.88  |
+|           |      | paper| 0.89  | 0.89  | 0.89  | 0.89  |
+| replay    | 128  | sim  | 11.40 | 10.41 | 9.15  | 3.34  |
+|           |      | paper| 11.40 | 11.40 | 10.60 | 3.38  |
+| replay    | 1024 | sim  | 10.70 | 10.26 | 7.68  | 2.29  |
+|           |      | paper| 10.70 | 10.70 | 7.76  | 2.17  |
+
+The shape is reproduced: graceful degradation for replay, a cliff for restart between
+1e-3 and 1e-2, cache-less flat. Points on the sweep plot where some of the 30 runs hit
+the 1-hour budget are censored at the budget and marked as upper bounds.
+
+### Known discrepancies, and notes to ourselves
+
+- **restart, 1024 tokens, p = 1e-3: sim 0.79 vs paper 0.48.** A fixed reconnect cost
+  can't make this cell slower without making the 128-token cells too slow. The real
+  restart baseline seems to pay something that grows with how far a failed attempt got
+  (freeing/re-allocating caches on all four servers, or a re-prefill of the prompt
+  each attempt). To revisit: add a restart cost proportional to tokens generated before
+  the failure and see whether one extra parameter closes this cell without breaking the
+  others.
+- **replay at low p, 128 tokens: sim slightly pessimistic** (10.41 vs 11.40 at 1e-4,
+  9.15 vs 10.60 at 1e-3). The fit is dominated by the 1e-2 cells; the paper's 128-token
+  recoveries look cheaper than its 1024-token ones in a way a fixed reconnect + linear
+  replay doesn't capture. Low priority.
+- The fit wants a large fixed per-failure cost (6 s) and a small per-token replay cost.
+  At p = 1e-2 recovery time is dominated by detect + reroute, not by replaying the
+  prefix. That is the relevant number for Experiment 2: what a defender buys by
+  slowing discovery is mostly in the fixed term.
+
 ## Status
 
 - [x] simulator with three strategies and both failure models
 - [x] Table 1 encoded, base costs derived
-- [ ] calibration run and sim-vs-paper table
-- [ ] sweep p from 0 to 5e-2 and plot (Appendix F shape)
-- [ ] map `leave_rate` to an effective per-hop p
+- [x] calibration run and sim-vs-paper table
+- [x] sweep p from 0 to 5e-2 and plot (Appendix F shape)
+- [ ] map `leave_rate` / `join_rate` to an effective per-hop p (the bridge to Experiment 2)
+- [ ] optional: restart cost proportional to tokens generated before failure
