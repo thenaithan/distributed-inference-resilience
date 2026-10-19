@@ -322,12 +322,17 @@ class Summary:
 
         Averaging steps/s per run instead would be biased upward for the restart
         strategy, whose completion time is heavy-tailed (geometric number of attempts).
-        None if no run finished within the time budget (DNF).
+        Runs that did not finish are censored at the time budget, so when `censored`
+        is True this is an upper bound. None if no run finished at all (DNF).
         """
-        times = [r.elapsed for r in self.runs if r.finished]
-        if not times:
+        if self.n_finished == 0:
             return None
+        times = [r.elapsed for r in self.runs]  # unfinished runs carry elapsed=budget
         return self.cfg.seq_len / (sum(times) / len(times))
+
+    @property
+    def censored(self) -> bool:
+        return 0 < self.n_finished < len(self.runs)
 
     @property
     def mean_observed_p(self) -> float:

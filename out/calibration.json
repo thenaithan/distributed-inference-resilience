@@ -1,0 +1,150 @@
+{
+  "params": {
+    "reconnect_restart": 3.0,
+    "reconnect_replay": 6.0,
+    "replay_per_token": 0.005,
+    "reconnect_cacheless": 0.0
+  },
+  "base": {
+    "restart": {
+      "hop_time": 0.01440597461395424,
+      "hop_time_per_token": 3.368636645376884e-06
+    },
+    "cacheless": {
+      "cacheless_fixed": 0.04269567412230767,
+      "cacheless_per_token": 0.00046478673616036435
+    },
+    "replay": {
+      "hop_time": 0.02172647411460895,
+      "hop_time_per_token": 3.2023692408591657e-06
+    }
+  },
+  "cells": [
+    {
+      "strategy": "restart",
+      "seq_len": 128,
+      "p": 0.0001,
+      "sim": 14.74510456257933,
+      "paper": 16.7
+    },
+    {
+      "strategy": "restart",
+      "seq_len": 128,
+      "p": 0.001,
+      "sim": 11.300313218139356,
+      "paper": 12.0
+    },
+    {
+      "strategy": "restart",
+      "seq_len": 128,
+      "p": 0.01,
+      "sim": 0.188429036862069,
+      "paper": 0.18
+    },
+    {
+      "strategy": "restart",
+      "seq_len": 1024,
+      "p": 0.0001,
+      "sim": 11.50301760397313,
+      "paper": 11.8
+    },
+    {
+      "strategy": "restart",
+      "seq_len": 1024,
+      "p": 0.001,
+      "sim": 0.8416475090613147,
+      "paper": 0.48
+    },
+    {
+      "strategy": "restart",
+      "seq_len": 1024,
+      "p": 0.01,
+      "sim": null,
+      "paper": null
+    },
+    {
+      "strategy": "replay",
+      "seq_len": 128,
+      "p": 0.0001,
+      "sim": 10.414212431544167,
+      "paper": 11.4
+    },
+    {
+      "strategy": "replay",
+      "seq_len": 128,
+      "p": 0.001,
+      "sim": 9.15293901984031,
+      "paper": 10.6
+    },
+    {
+      "strategy": "replay",
+      "seq_len": 128,
+      "p": 0.01,
+      "sim": 3.344082419254507,
+      "paper": 3.38
+    },
+    {
+      "strategy": "replay",
+      "seq_len": 1024,
+      "p": 0.0001,
+      "sim": 10.26384904990581,
+      "paper": 10.7
+    },
+    {
+      "strategy": "replay",
+      "seq_len": 1024,
+      "p": 0.001,
+      "sim": 7.678606354123398,
+      "paper": 7.76
+    },
+    {
+      "strategy": "replay",
+      "seq_len": 1024,
+      "p": 0.01,
+      "sim": 2.294935652843092,
+      "paper": 2.17
+    },
+    {
+      "strategy": "cacheless",
+      "seq_len": 128,
+      "p": 0.0001,
+      "sim": 3.4388268966024857,
+      "paper": 3.44
+    },
+    {
+      "strategy": "cacheless",
+      "seq_len": 128,
+      "p": 0.001,
+      "sim": 3.4370087866332395,
+      "paper": 3.44
+    },
+    {
+      "strategy": "cacheless",
+      "seq_len": 128,
+      "p": 0.01,
+      "sim": 3.4114829082312204,
+      "paper": 3.44
+    },
+    {
+      "strategy": "cacheless",
+      "seq_len": 1024,
+      "p": 0.0001,
+      "sim": 0.8899074080359889,
+      "paper": 0.89
+    },
+    {
+      "strategy": "cacheless",
+      "seq_len": 1024,
+      "p": 0.001,
+      "sim": 0.8890778738505292,
+      "paper": 0.89
+    },
+    {
+      "strategy": "cacheless",
+      "seq_len": 1024,
+      "p": 0.01,
+      "sim": 0.8813176640650924,
+      "paper": 0.89
+    }
+  ]
+}
