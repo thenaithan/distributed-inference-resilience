@@ -28,8 +28,11 @@ for `cacheless`, matching the paper's numbers around p = 1e-2.
     the version Experiment 2 (minimum simultaneous cut) builds on.
 - `churnsim/petals.py` – Table 1 data and the derivation of the no-failure costs from
   the p = 0 columns (so hop time is not a free parameter).
-- `churnsim/calibrate.py` – grid search for the two free parameters: reconnect cost and
-  replay cost per token. `python -m churnsim.calibrate --seeds 30`
+- `churnsim/calibrate.py` – grid search for the free parameters: reconnect cost and
+  replay cost per token.
+- `churnsim/sweep.py` – throughput vs p for all strategies and both sequence lengths.
+- `churnsim/churn.py` – the bridge from node leave rate λ to an effective per-hop p.
+- `tests/` – sanity checks; `python -m tests.test_model` (or `pytest`).
 
 ## Quick start
 
@@ -52,10 +55,13 @@ time is heavy-tailed.
 pip install -r requirements.txt
 python -m churnsim.calibrate --seeds 30 --json out/calibration.json   # ~35 s
 python -m churnsim.sweep --seeds 30                                    # ~25 s
+python -m churnsim.churn --seeds 20                                    # ~10 s
+python -m tests.test_model
 ```
 
 `out/calibration.json` holds the fitted parameters and the sim-vs-paper cells;
-`out/sweep.csv` and `out/throughput_vs_failure.png` are the sweep.
+`out/sweep.csv` and `out/throughput_vs_failure.png` are the sweep;
+`out/churn_to_p.csv` and `out/churn_to_p.png` are the churn bridge.
 
 ## Results (2026-10-19)
 
@@ -85,6 +91,30 @@ The shape is reproduced: graceful degradation for replay, a cliff for restart be
 1e-3 and 1e-2, cache-less flat. Points on the sweep plot where some of the 30 runs hit
 the 1-hour budget are censored at the budget and marked as upper bounds.
 
+![throughput vs per-hop failure probability](out/throughput_vs_failure.png)
+
+### From node churn to p
+
+Petals varies p directly; the plan (and Experiment 2) talks about nodes leaving at a
+rate λ. The two are the same experiment in different units. With 3 replicas per stage,
+joins balancing leaves, and the replay strategy at 1024 tokens:
+
+![churn to effective p](out/churn_to_p.png)
+
+- Right panel: throughput under node churn (blue) matches the p-mode curve evaluated at
+  the failure rate the client actually observed (grey) to within ~15% across three
+  decades of λ. So anything measured against p transfers to λ and back.
+- Left panel: the obvious estimate p ≈ 1 − exp(−λ·τ_step) with τ_step the no-failure
+  step time (dotted) undercounts by 2x and more once failures are frequent. The reason
+  is that a 6 s reconnect on one stage leaves the other three stages' nodes exposed for
+  those 6 s too, so failures cluster. Using the realised mean step time, recoveries
+  included (dashed), tracks the observed p up to λ ≈ 2e-2.
+- Above λ ≈ 2e-2 (mean node lifetime under a minute, against a 6 s reconnect plus a
+  2.6 s replay of 512 tokens) replacements die during recovery, stages run empty and the
+  client spends most of its time waiting for a replica to appear. That regime is the
+  one Experiment 2 is about: it is the "every node holding one stage" cut happening
+  stochastically instead of deliberately.
+
 ### Known discrepancies, and notes to ourselves
 
 - **restart, 1024 tokens, p = 1e-3: sim 0.79 vs paper 0.48.** A fixed reconnect cost
@@ -109,5 +139,6 @@ the 1-hour budget are censored at the budget and marked as upper bounds.
 - [x] Table 1 encoded, base costs derived
 - [x] calibration run and sim-vs-paper table
 - [x] sweep p from 0 to 5e-2 and plot (Appendix F shape)
-- [ ] map `leave_rate` / `join_rate` to an effective per-hop p (the bridge to Experiment 2)
+- [x] map `leave_rate` / `join_rate` to an effective per-hop p (the bridge to Experiment 2)
+- [x] tests
 - [ ] optional: restart cost proportional to tokens generated before failure
