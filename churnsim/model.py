@@ -93,7 +93,11 @@ class Config:
     routing: str = "random"
     # A hop slower than this multiple of its nominal time counts as a failure and the
     # client re-routes. None = never (Petals: only request_timeout, 180 s, so a node
-    # slowed 10x or 100x is never replaced mid-session).
+    # slowed 10x or 100x is never replaced mid-session). With "random" routing the
+    # evictor has no memory of which replicas are slow and may pick the same one back
+    # (the "naive" evictor of NOTES §5); with "min_latency" it switches only when it
+    # knows a faster replica. The hop time compared includes the load factor, so with
+    # load_alpha > 0 load alone can trigger eviction; not exercised in any sweep.
     slow_threshold: Optional[float] = None
 
     # --- discovery held on the server nodes (Experiment 2b) --------------------------
@@ -399,9 +403,16 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
         if dead and cfg.detect_time is not None:
             cost = cfg.detect_time
         yield cost
+        if not dead and not node.alive:
+            # the node left during this hop: the send fails, and with a detection
+            # timeout the client only notices once the timeout has run its course
+            dead = True
+            if cfg.detect_time is not None:
+                yield max(cfg.detect_time - cost, 0.0)
         st.hops += 1
 
-        too_slow = cfg.slow_threshold is not None and cost > cfg.slow_threshold * nominal
+        too_slow = (not dead and cfg.slow_threshold is not None
+                    and cost > cfg.slow_threshold * nominal)
         if too_slow and cfg.routing == "min_latency":
             # a latency-aware router only switches when it knows somewhere faster
             too_slow = any(n.speed < node.speed for n in candidates(s) if n is not node)
@@ -449,6 +460,10 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
                 else:
                     yield (k * cfg.replay_per_token * replacement.speed
                            * (1 + cfg.load_alpha * max(replacement.load - 1, 0)))
+                    if not replacement.alive:          # left during the replay
+                        dead = True
+                        if cfg.detect_time is not None:
+                            yield cfg.detect_time
                 st.replays += 1
                 st.replayed_tokens += k
                 st.replay_sizes.append(k)
