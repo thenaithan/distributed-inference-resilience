@@ -66,6 +66,10 @@ class Config:
     # Cost of discovering a replacement / re-establishing a stream after a failure.
     # Paid by every strategy on every failure.
     reconnect_time: float = 2.5
+    # RESTART only: extra cost of a restart that depends on how far the failed attempt
+    # got (k = tokens generated). Hypotheses for the paper's 1024/1e-3 cell, see NOTES.md.
+    restart_cost_per_token: float = 0.0        # linear in k
+    restart_cost_per_token_sq: float = 0.0     # quadratic in k
     # REPLAY only: per-token cost for a replacement stage to rebuild its KV cache from
     # the client-side cache (one batched forward over the prefix, for that stage only).
     replay_per_token: float = 0.0089
@@ -254,6 +258,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
 
         if strategy is Strategy.RESTART:
             st.restarts += 1
+            yield cfg.restart_cost_per_token * k + cfg.restart_cost_per_token_sq * k * k
             for n in chain:
                 if n is not None:
                     n.cached = 0
