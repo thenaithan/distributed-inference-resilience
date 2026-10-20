@@ -129,19 +129,19 @@ Consequences for the defender's question:
 The formula gives ~60 attempts, each dying after ~250 tokens (15 s) plus 3 s reconnect,
 ≈ 1100 s. The paper's number needs each failed attempt to cost about 17 s more.
 
-Tested (`python -m churnsim.restart_variants --seeds 50`), fitting R and one extra
-parameter on the five finite restart cells:
+Tested (`python -m churnsim.restart_variants --seeds 200`, uncensored), fitting R and
+one extra parameter on the five finite restart cells:
 
 | hypothesis            | fit             | loss  | 128/1e-4 | 128/1e-3 | 128/1e-2 | 1024/1e-4 | 1024/1e-3 |
 |-----------------------|-----------------|-------|----------|----------|----------|-----------|-----------|
-| fixed R               | R=3.0           | 0.413 | 0.89     | 0.94     | 0.99     | 0.98      | **1.87**  |
-| R + a·k (linear)      | R=1.0, a=0.07   | 0.157 | 0.84     | 0.84     | 1.08     | **0.78**  | 1.18      |
-| R + b·k² (quadratic)  | R=3.0, b=1e-4   | 0.155 | 0.88     | 0.91     | 0.97     | **0.78**  | 1.30      |
+| fixed R               | R=3.0           | 0.439 | 0.95     | 0.85     | 0.92     | 1.02      | **1.89**  |
+| R + a·k (linear)      | R=1.0, a=0.07   | 0.126 | 0.93     | **0.74** | 1.00     | **0.85**  | 1.06      |
+| R + b·k² (quadratic)  | R=3.0, b=1e-4   | 0.118 | 0.95     | 0.83     | 0.90     | **0.85**  | 1.22      |
 
-(cells are sim/paper ratios; 50 seeds with the 1 h budget, so the 1024/1e-3 row is a
-slight upper bound, which does not change the picture). Both progress-dependent costs
+(cells are sim/paper ratios). Both progress-dependent costs
 halve the loss, but they do
-it by trading the 1024/1e-3 error for a 1024/1e-4 error. A failed attempt at 1e-4
+it by trading the 1024/1e-3 error for errors at 1024/1e-4 (and, for the linear
+variant, 128/1e-3). A failed attempt at 1e-4
 typically got ~450 tokens in, further than at 1e-3, so any cost that grows with
 progress hits that cell harder, and the paper says that cell barely slowed down
 (15.5 → 11.8). The five cells are not jointly consistent with any one-parameter

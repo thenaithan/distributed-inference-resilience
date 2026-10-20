@@ -7,7 +7,7 @@
 Each is fitted on the five finite restart cells of Table 1 (128: 1e-4, 1e-3, 1e-2;
 1024: 1e-4, 1e-3). The 1024/1e-2 cell is DNF for all of them by construction.
 
-Run:  python -m churnsim.restart_variants [--seeds 50]
+Run:  python -m churnsim.restart_variants [--seeds 200]   (~10 min)
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def show(name, params, pred):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, default=50)
+    ap.add_argument("--seeds", type=int, default=200)
     args = ap.parse_args()
     base = base_costs_from_p0()
     results = {}
