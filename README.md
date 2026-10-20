@@ -296,6 +296,46 @@ protocol, not removing its hosts, and this work measures the effect of that atta
 not its cost. Not modelled: nodes returning wrong outputs, the cost of those DHT
 attacks, and heavy-tailed node lifetimes.
 
+## Where this applies
+
+The calibration is Petals (2023), but the three recovery strategies are the three
+options that exist in current systems, and the coordination path the results point at
+is present in all of them.
+
+- **Restart from scratch** is the default in today's datacenter serving stacks. LUMEN
+  (June 2026) describes stop-and-restart, where an interrupted request is re-run from
+  scratch on a surviving worker, as the default behaviour of KServe, TGI, Triton and
+  vLLM on Kubernetes. That is the strategy that collapses once a generation expects
+  about one failure, $p \approx 1/(S T)$.
+- **Checkpointed KV state** is the alternative those systems are moving to: DéjàVu
+  streams each request's KV cache to a neighbouring worker, LUMEN to a load-chosen
+  holder. This is the same mechanism as Petals' reroute-and-replay with the cache held
+  server-side instead of client-side, so the linear-in-$p$ curve and the cascade
+  threshold $\lambda^* = 1/(S C)$ apply with a different $C$.
+- **Detection** in LUMEN is a gateway health check with no stated latency, the same gap
+  that Experiment 2's `detect_time` sweep is about.
+- **Disaggregated prefill/decode** (vLLM's KV connectors, llm-d, Dynamo) adds a KV
+  transfer between a prefill worker and a decode worker, which is one more
+  coordination path of the kind this work finds to be the thin one. vLLM is adding
+  fault tolerance for it as of late 2026. It is not in the model yet.
+- **Decentralised and heterogeneous serving**, the essay's actual setting, keeps the
+  Petals structure: Helix (ASPLOS 2025) and HexGen-2 (2025) place pipeline stages across
+  heterogeneous machines; exo discovers peers with mDNS/libp2p and pipelines across
+  consumer devices. Discovery plus pipeline plus some recovery policy is the shape of
+  all of them.
+
+What a modern stack changes is the numbers in $C$, not the structure. Measuring $C$ on
+one of these stacks is the next calibration (see Experiment 4 in the plan).
+
+References: [LUMEN, arXiv:2606.17787](https://arxiv.org/abs/2606.17787);
+[vLLM PR #56430, KV-transfer fault tolerance](https://github.com/vllm-project/vllm/pull/56430);
+[vLLM disaggregated serving guide, Sept 2026](https://vllm-project.github.io/2026/09/29/disaggregated-serving-guide.html);
+[llm-d disaggregation operations](https://llm-d.ai/docs/dev/operations/disaggregation/vllm);
+[Helix, arXiv:2406.01566](https://arxiv.org/abs/2406.01566);
+[HexGen-2, arXiv:2502.07903](https://arxiv.org/abs/2502.07903);
+[gLLM, arXiv:2504.14775](https://arxiv.org/abs/2504.14775);
+[exo](https://github.com/exo-explore/exo).
+
 ## Status
 
 - [x] simulator with three strategies and both failure models
@@ -311,3 +351,8 @@ attacks, and heavy-tailed node lifetimes.
 - [x] Experiment 2 extensions: detection latency, client routing cache, degrade cut with three routing policies
 - [x] Experiment 2b: DHT entries tied to server nodes; concurrent clients
 - [ ] exponential retry backoff; heavy-tailed (Weibull) node lifetimes
+
+## Acknowledgement
+
+The simulation, analysis and the two code reviews were built with Claude (Anthropic)
+as a pair-programming partner. The questions, the framing and the conclusions are mine.
