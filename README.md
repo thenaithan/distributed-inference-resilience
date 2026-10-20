@@ -43,8 +43,8 @@ for `cacheless`, matching the paper's numbers around p = 1e-2.
 python3 -c "
 from churnsim.petals import config_for
 from churnsim.model import Strategy, run_many
-cfg = config_for(Strategy.REPLAY, 128, 1e-2, reconnect_time=2.5, replay_per_token=0.0089)
-print(run_many(cfg, Strategy.REPLAY, seeds=50).mean_steps_per_s)   # paper: 3.38
+cfg = config_for(Strategy.REPLAY, 128, 1e-2, reconnect_time=4.5, replay_per_token=0.008)
+print(run_many(cfg, Strategy.REPLAY, seeds=200).mean_steps_per_s)   # paper: 3.38
 "
 ```
 
@@ -56,9 +56,10 @@ time is heavy-tailed.
 
 ```
 pip install -r requirements.txt
-python -m churnsim.calibrate --seeds 30 --json out/calibration.json   # ~35 s
-python -m churnsim.sweep --seeds 30                                    # ~25 s
-python -m churnsim.churn --seeds 20                                    # ~10 s
+python -m churnsim.calibrate --seeds 200 --json out/calibration.json  # ~5 min
+python -m churnsim.sweep --seeds 100                                   # ~2 min
+python -m churnsim.churn --seeds 50                                    # ~1 min
+python -m churnsim.analytic                                            # closed forms vs sweep
 python -m tests.test_model
 ```
 
@@ -72,27 +73,29 @@ Base costs from the p = 0 columns (not fitted): restart hop 14.4 ms, Algorithm 1
 21.7 ms (the paper notes its implementation is less mature), both growing ~3 µs per
 cached token; cache-less 42.7 ms + 0.465 ms per prefix token per hop.
 
-Fitted failure costs: restart reconnect 3.0 s (whole chain re-opened), replay
-reconnect 6.0 s plus 5 ms per replayed token for one stage, cache-less ~0.
+Fitted failure costs (200 seeds per cell, no time budget): restart reconnect 3.0 s
+(whole chain re-opened), replay reconnect 4.5 s plus 8 ms per replayed token for one
+stage, cache-less ~0. Cells with fewer than 0.1 expected failures per run (128 tokens
+at p = 1e-4) are excluded from the fit and shown as "-".
 
 | strategy  | T    |      | p=0   | 1e-4  | 1e-3  | 1e-2  |
 |-----------|------|------|-------|-------|-------|-------|
-| restart   | 128  | sim  | 17.10 | 14.75 | 11.30 | 0.19  |
+| restart   | 128  | sim  | 17.10 | -     | 10.23 | 0.17  |
 |           |      | paper| 17.10 | 16.70 | 12.00 | 0.18  |
-| restart   | 1024 | sim  | 15.50 | 11.50 | 0.79  | DNF   |
+| restart   | 1024 | sim  | 15.50 | 12.08 | 0.91  | DNF   |
 |           |      | paper| 15.50 | 11.80 | 0.48  | DNF   |
-| cacheless | 128  | sim  | 3.44  | 3.44  | 3.44  | 3.41  |
+| cacheless | 128  | sim  | 3.44  | -     | 3.44  | 3.41  |
 |           |      | paper| 3.44  | 3.44  | 3.44  | 3.44  |
 | cacheless | 1024 | sim  | 0.89  | 0.89  | 0.89  | 0.88  |
 |           |      | paper| 0.89  | 0.89  | 0.89  | 0.89  |
-| replay    | 128  | sim  | 11.40 | 10.41 | 9.15  | 3.34  |
+| replay    | 128  | sim  | 11.40 | -     | 9.35  | 3.48  |
 |           |      | paper| 11.40 | 11.40 | 10.60 | 3.38  |
-| replay    | 1024 | sim  | 10.70 | 10.26 | 7.68  | 2.29  |
+| replay    | 1024 | sim  | 10.70 | 10.31 | 7.76  | 2.24  |
 |           |      | paper| 10.70 | 10.70 | 7.76  | 2.17  |
 
 The shape is reproduced: graceful degradation for replay, a cliff for restart between
-1e-3 and 1e-2, cache-less flat. Points on the sweep plot where some of the 30 runs hit
-the 1-hour budget are censored at the budget and marked as upper bounds.
+1e-3 and 1e-2, cache-less flat. Points on the sweep plot where some runs hit the
+1-hour budget are censored at the budget and marked as upper bounds.
 
 ![throughput vs per-hop failure probability](out/throughput_vs_failure.png)
 
@@ -105,36 +108,40 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
 ![churn to effective p](out/churn_to_p.png)
 
 - Right panel: throughput under node churn (blue) matches the p-mode curve evaluated at
-  the failure rate the client actually observed (grey) to within ~15% across three
-  decades of λ. So anything measured against p transfers to λ and back.
+  the failure rate the client actually observed (grey) to within ~20% for λ from 1e-4
+  to 2e-2. So anything measured against p transfers to λ and back. (The agreement is
+  partly by construction: both modes charge the same reconnect cost. What it shows is
+  that failure clustering and empty-stage waits, which only churn mode has, cost at
+  most ~20% in this range.)
 - Left panel: the obvious estimate p ≈ 1 − exp(−λ·τ_step) with τ_step the no-failure
   step time (dotted) undercounts by 2x and more once failures are frequent. The reason
-  is that a 6 s reconnect on one stage leaves the other three stages' nodes exposed for
-  those 6 s too, so failures cluster. Using the realised mean step time, recoveries
-  included (dashed), tracks the observed p up to λ ≈ 2e-2.
-- Above λ ≈ 2e-2 (mean node lifetime under a minute, against a 6 s reconnect plus a
-  2.6 s replay of 512 tokens) replacements die during recovery, stages run empty and the
-  client spends most of its time waiting for a replica to appear. That regime is the
-  one Experiment 2 is about: it is the "every node holding one stage" cut happening
-  stochastically instead of deliberately.
+  is that a reconnect on one stage leaves the other three stages' nodes exposed for
+  that whole time too, so failures cluster. Using the realised mean step time,
+  recoveries included (dashed), tracks the observed p up to λ ≈ 1e-2.
+- Above λ ≈ 2e-2 throughput collapses. This is not mostly waiting for empty stages
+  (waits are ~6% of elapsed time there, consistent with P(stage empty) = e^(−3)); it is
+  a recovery cascade: each recovery takes C ≈ 9 s, during which the other three stages'
+  nodes are exposed, and once S·λ·C exceeds 1 each failure spawns more than one further
+  failure on average. NOTES.md §2 derives the threshold λ* = 1/(S·C) ≈ 0.028 /s. That
+  regime is the one Experiment 2 is about: it is the "every node holding one stage" cut
+  happening stochastically instead of deliberately.
 
 ### Known discrepancies, and notes to ourselves
 
-- **restart, 1024 tokens, p = 1e-3: sim 0.79 vs paper 0.48.** A fixed reconnect cost
-  can't make this cell slower without making the 128-token cells too slow. The real
-  restart baseline seems to pay something that grows with how far a failed attempt got
-  (freeing/re-allocating caches on all four servers, or a re-prefill of the prompt
-  each attempt). To revisit: add a restart cost proportional to tokens generated before
-  the failure and see whether one extra parameter closes this cell without breaking the
-  others.
-- **replay at low p, 128 tokens: sim slightly pessimistic** (10.41 vs 11.40 at 1e-4,
-  9.15 vs 10.60 at 1e-3). The fit is dominated by the 1e-2 cells; the paper's 128-token
+- **restart, 1024 tokens, p = 1e-3: sim 0.91 vs paper 0.48.** The closed form agrees
+  with the sim (0.90), so this is a mismatch between the paper and the model, not a
+  simulation artefact. A restart cost growing with progress (linear or quadratic in
+  tokens generated) was tested and does not fit all five restart cells; see NOTES.md §3.
+  Left open; the paper's benchmark code for this table is not public.
+- **replay at 128 tokens, p = 1e-3: sim 9.35 vs paper 10.60.** The paper's 128-token
   recoveries look cheaper than its 1024-token ones in a way a fixed reconnect + linear
-  replay doesn't capture. Low priority.
-- The fit wants a large fixed per-failure cost (6 s) and a small per-token replay cost.
-  At p = 1e-2 recovery time is dominated by detect + reroute, not by replaying the
-  prefix. That is the relevant number for Experiment 2: what a defender buys by
-  slowing discovery is mostly in the fixed term.
+  replay doesn't capture; a fit on the 1024-token cells alone would want a larger R.
+  Also the paper's cells at p = 1e-4 are statistically meaningless (0.05 to 0.4
+  expected failures per run) and were excluded from the fit.
+- At 1024 tokens the two parts of a recovery are about equal: 4.5 s fixed (detect,
+  DHT lookup, reroute, connect) and ~4 s replaying a 512-token prefix on one stage. At
+  128 tokens the fixed part dominates. For Experiment 2 both are levers, and under real
+  churn the fixed part grows by the detection timeout (NOTES.md §4).
 
 ## Status
 

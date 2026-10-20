@@ -36,8 +36,12 @@ def test_replay_replays_exactly_the_established_prefix():
     st = simulate(cfg, Strategy.REPLAY)
     assert st.finished and st.tokens == 64
     assert st.replays > 0
-    # every replay rebuilds at most the tokens generated so far
-    assert st.replayed_tokens <= st.replays * 64
+    # in replay mode k never decreases, so successive replays rebuild a non-decreasing
+    # prefix, and the total replayed is the sum of those prefixes
+    sizes = st.replay_sizes
+    assert all(a <= b for a, b in zip(sizes, sizes[1:]))
+    assert sum(sizes) == st.replayed_tokens
+    assert max(sizes) < 64
 
 
 def test_churn_mode_waits_when_stage_is_empty():
@@ -56,10 +60,16 @@ def test_churn_mode_with_joins_completes():
     assert st.finished and st.tokens == 200
 
 
-def test_summary_censoring_flag():
-    cfg = config_for(Strategy.RESTART, 1024, 2e-3, reconnect_time=3.0, replay_per_token=0.0)
-    s = run_many(cfg, Strategy.RESTART, seeds=10)
-    assert s.censored == (0 < s.n_finished < 10)
+def test_summary_censoring_uses_budget_for_unfinished_runs():
+    from churnsim.model import Stats, Summary
+    cfg = Config(seq_len=100, time_budget=50.0)
+    runs = [Stats(tokens=100, finished=True, elapsed=10.0),
+            Stats(tokens=40, finished=False, elapsed=50.0)]
+    s = Summary(Strategy.REPLAY, cfg, runs)
+    assert s.censored
+    assert math.isclose(s.mean_steps_per_s, 100 / 30.0)
+    s_all_dnf = Summary(Strategy.REPLAY, cfg, [runs[1]])
+    assert s_all_dnf.mean_steps_per_s is None and not s_all_dnf.censored
 
 
 if __name__ == "__main__":

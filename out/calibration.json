@@ -1,8 +1,8 @@
 {
   "params": {
     "reconnect_restart": 3.0,
-    "reconnect_replay": 6.0,
-    "replay_per_token": 0.005,
+    "reconnect_replay": 4.5,
+    "replay_per_token": 0.008,
     "reconnect_cacheless": 0.0
   },
   "base": {
@@ -23,36 +23,29 @@
     {
       "strategy": "restart",
       "seq_len": 128,
-      "p": 0.0001,
-      "sim": 14.74510456257933,
-      "paper": 16.7
-    },
-    {
-      "strategy": "restart",
-      "seq_len": 128,
       "p": 0.001,
-      "sim": 11.300313218139356,
+      "sim": 10.228596315569966,
       "paper": 12.0
     },
     {
       "strategy": "restart",
       "seq_len": 128,
       "p": 0.01,
-      "sim": 0.188429036862069,
+      "sim": 0.1662333610247509,
       "paper": 0.18
     },
     {
       "strategy": "restart",
       "seq_len": 1024,
       "p": 0.0001,
-      "sim": 11.50301760397313,
+      "sim": 12.083660399668787,
       "paper": 11.8
     },
     {
       "strategy": "restart",
       "seq_len": 1024,
       "p": 0.001,
-      "sim": 0.8416475090613147,
+      "sim": 0.906457782319095,
       "paper": 0.48
     },
     {
@@ -65,85 +58,71 @@
     {
       "strategy": "replay",
       "seq_len": 128,
-      "p": 0.0001,
-      "sim": 10.414212431544167,
-      "paper": 11.4
-    },
-    {
-      "strategy": "replay",
-      "seq_len": 128,
       "p": 0.001,
-      "sim": 9.15293901984031,
+      "sim": 9.354719980506843,
       "paper": 10.6
     },
     {
       "strategy": "replay",
       "seq_len": 128,
       "p": 0.01,
-      "sim": 3.344082419254507,
+      "sim": 3.481268238123868,
       "paper": 3.38
     },
     {
       "strategy": "replay",
       "seq_len": 1024,
       "p": 0.0001,
-      "sim": 10.26384904990581,
+      "sim": 10.307203184403262,
       "paper": 10.7
     },
     {
       "strategy": "replay",
       "seq_len": 1024,
       "p": 0.001,
-      "sim": 7.678606354123398,
+      "sim": 7.759211209298146,
       "paper": 7.76
     },
     {
       "strategy": "replay",
       "seq_len": 1024,
       "p": 0.01,
-      "sim": 2.294935652843092,
+      "sim": 2.237465040365841,
       "paper": 2.17
     },
     {
       "strategy": "cacheless",
       "seq_len": 128,
-      "p": 0.0001,
-      "sim": 3.4388268966024857,
-      "paper": 3.44
-    },
-    {
-      "strategy": "cacheless",
-      "seq_len": 128,
       "p": 0.001,
-      "sim": 3.4370087866332395,
+      "sim": 3.43666118169173,
       "paper": 3.44
     },
     {
       "strategy": "cacheless",
       "seq_len": 128,
       "p": 0.01,
-      "sim": 3.4114829082312204,
+      "sim": 3.406752687267766,
       "paper": 3.44
     },
     {
       "strategy": "cacheless",
       "seq_len": 1024,
       "p": 0.0001,
-      "sim": 0.8899074080359889,
+      "sim": 0.8899100012474522,
       "paper": 0.89
     },
     {
       "strategy": "cacheless",
       "seq_len": 1024,
       "p": 0.001,
-      "sim": 0.8890778738505292,
+      "sim": 0.8890927297976025,
       "paper": 0.89
     },
     {
       "strategy": "cacheless",
       "seq_len": 1024,
       "p": 0.01,
-      "sim": 0.8813176640650924,
+      "sim": 0.8810209789029368,
       "paper": 0.89
     }
   ]

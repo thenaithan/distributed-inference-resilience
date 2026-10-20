@@ -15,9 +15,10 @@ Every hop costs h and, with probability p, a recovery R + k·r. Expected seconds
 
     1/throughput = S·h + S·p·(R + k̄·r) / (1 − p)
 
-(The 1/(1−p) is because a replay send can itself fail.) T=128, p=1e-2: 0.34 s/step,
-2.9 steps/s; sim 3.34, paper 3.38. The curve leaves the flat region where the failure
-term equals the hop term, p ≈ h/C ≈ 0.022/8.6 ≈ 2.5e-3, which is where the blue line
+(The 1/(1−p) is because a replay send can itself fail; the exact form in
+`analytic.py` also retries the hop.) T=128, p=1e-2: 4×0.022 + 4×0.01×(4.5 + 64×0.008)
+≈ 0.29 s/step, 3.4 steps/s; sim 3.48, paper 3.38. The curve leaves the flat region where the failure
+term equals the hop term, p ≈ h/C ≈ 0.022/8.6 ≈ 2.5e-3 (C at 1024 tokens), which is where the blue line
 on the sweep plot starts to bend.
 
 ### Restart from scratch: exponential in p·S·T
@@ -42,9 +43,11 @@ Restart and replay cross where a generation expects about one failure:
 
     p* ≈ 1 / (S·T)
 
-T=128: 2.0e-3. T=1024: 2.4e-4. Both match the sweep plot. This is the most reusable
-number from Experiment 1: for any pipeline, S and T alone give the failure rate above
-which stateless restart stops being viable.
+T=128: 2.0e-3. T=1024: 2.4e-4. This is a rule of thumb; the exact crossing also depends
+on R and on the two hop times, and with the fitted costs lands a little lower (about
+1.5e-3 at T=128). Still the most reusable number from Experiment 1: S and T alone put
+the failure rate above which stateless restart stops being viable within a factor of
+two.
 
 ### Where this comes from
 
@@ -58,12 +61,18 @@ renewal-reward theorem (Ross, ch. 7).
 
 ### Analytic vs simulation
 
-`python -m churnsim.analytic` reports sim/formula ratios. Replay: 0.93 to 1.15 across
-all 22 cells (the formula is slightly pessimistic at 128 tokens, p around 1e-2, because
-it ignores that failures during replay are rarer than failures during generation).
-Restart: 0.87 to 1.16 on all uncensored cells. The one large miss, restart 1024 tokens
-at p=2e-3 (ratio 11.6), is the censored point: the formula says 0.03 steps/s, about
-9 hours, so a 1-hour budget could only ever return an upper bound there.
+`python -m churnsim.analytic` reports sim/formula ratios; see the table there for the
+current numbers. The formulas agree with the simulation to within a few percent on
+every uncensored cell. The large misses are the two censored restart points at 1024
+tokens (p = 1e-3 and 2e-3); at 2e-3 the formula says 0.03 steps/s, about 9 hours per
+run, so a 1-hour budget can only ever return an upper bound there.
+
+A note on seeds: an earlier 30-seed calibration (seeds 0..29) happened to draw ~18%
+fewer failures than nominal on every 128-token cell, which made replay at 128/1e-2
+look like an exact match to the paper and inflated the fitted reconnect to 6 s. With
+200 seeds and no censoring the fit moved to the values quoted in the README. Lesson
+kept: never calibrate on fewer than a few hundred seeds, and check `observed_p`
+against nominal in the output.
 
 ## 2. Node churn: recovery time feeds back into failure rate
 
@@ -78,7 +87,7 @@ which diverges at
 
     λ* = 1 / (S·C)
 
-For replay at 1024 tokens, C ≈ 6 + 512×0.005 ≈ 8.6 s, so λ* ≈ 0.029 /s. The churn
+For replay at 1024 tokens, C ≈ 4.5 + 512×0.008 ≈ 8.6 s, so λ* ≈ 0.029 /s. The churn
 sweep collapsed between λ = 2e-2 and 5e-2.
 
 Read S·λ·C as a branching ratio: one failure, during its own recovery, leaves the other
@@ -90,10 +99,12 @@ stable under nominal load, with a self-sustaining feedback loop past a threshold
 
 Consequences for the defender's question:
 
-- C is dominated by the fixed detection-and-discovery term (6 s), not the replay (2.6 s).
-  So λ* is mostly set by how fast a client can find a replacement. Doubling discovery
-  latency halves λ*. That is "attack the discovery layer", as a number, and Experiment 2
-  can test it by varying `reconnect_time` rather than removing nodes.
+- At 1024 tokens C splits about evenly between the fixed detection-and-discovery term
+  (4.5 s) and the replay (~4 s); at short sequences the fixed term dominates. Both are
+  levers. Doubling discovery latency adds S·λ·4.5 s to the branching ratio, and under
+  real churn the fixed term is far larger than in the Table 1 setup (§4), so in
+  practice λ* is set by detection. That is "attack the discovery layer", as a number,
+  and Experiment 2 can test it by varying `reconnect_time` rather than removing nodes.
 - Empty stages have their own formula. With join rate n·λ balancing leave rate λ, live
   replicas per stage form an M/M/∞ birth–death process with Poisson(n) stationary
   distribution. P(stage empty) = e^(−n), about 5% for n = 3, independent of λ. λ sets
@@ -104,7 +115,7 @@ Consequences for the defender's question:
 
 ## 3. Discrepancies with the paper
 
-### Restart, 1024 tokens, p = 1e-3: sim 0.79 (formula 0.90), paper 0.48
+### Restart, 1024 tokens, p = 1e-3: sim 0.91 (formula 0.90), paper 0.48
 
 The formula gives ~60 attempts, each dying after ~250 tokens (15 s) plus 3 s reconnect,
 ≈ 1100 s. The paper's number needs each failed attempt to cost about 17 s more.
@@ -118,7 +129,9 @@ parameter on the five finite restart cells:
 | R + a·k (linear)      | R=1.0, a=0.07   | 0.157 | 0.84     | 0.84     | 1.08     | **0.78**  | 1.18      |
 | R + b·k² (quadratic)  | R=3.0, b=1e-4   | 0.155 | 0.88     | 0.91     | 0.97     | **0.78**  | 1.30      |
 
-(cells are sim/paper ratios). Both progress-dependent costs halve the loss, but they do
+(cells are sim/paper ratios; 50 seeds with the 1 h budget, so the 1024/1e-3 row is a
+slight upper bound, which does not change the picture). Both progress-dependent costs
+halve the loss, but they do
 it by trading the 1024/1e-3 error for a 1024/1e-4 error. A failed attempt at 1e-4
 typically got ~450 tokens in, further than at 1e-3, so any cost that grows with
 progress hits that cell harder, and the paper says that cell barely slowed down
@@ -151,7 +164,7 @@ Currently they are in the loss with equal weight, which is wrong.
 ## 4. What the Petals client actually does on failure (from source)
 
 Read from `src/petals/client/inference_session.py` and `routing/sequence_manager.py`
-at commit 22afba6 (Aug 2024). This is what the fitted C = 6 s + 5 ms/token stands for.
+at commit 22afba6 (Aug 2024). This is what the fitted C = 4.5 s + 8 ms/token stands for.
 
 Per hop, `InferenceSession.step` tries the server; on any exception:
 
@@ -171,7 +184,7 @@ Per hop, `InferenceSession.step` tries the server; on any exception:
    be client-caused"). In the Table 1 setup there is exactly one server per stage, so
    each injected failure routes straight back to the reset server after the DHT refresh.
 
-So R ≈ DHT refresh + routing + connect, not the backoff, and the 6 s fit is plausible
+So R ≈ DHT refresh + routing + connect, not the backoff, and the 4.5 s fit is plausible
 for a hivemind DHT lookup with `latest=True` plus session setup on a local network.
 
 Two things the Table 1 experiment does not exercise, and that matter for churn:

@@ -18,7 +18,9 @@ Two failure models are supported and can be combined:
   hop_failure_p   Petals-style. Every send fails independently with probability p.
                   The stage is "reset" (its cache for this session is lost) but the
                   node stays in the registry. This is what Table 1 of the paper varies.
-  leave_rate      Node churn. Each node's lifetime is Exp(leave_rate); a leaving node is
+  leave_rate      Node churn. (Combining both knobs is allowed but note that a
+                  p-failure then reroutes to a different replica, whereas in pure
+                  p-mode it reconnects to the same, reset node.) Each node's lifetime is Exp(leave_rate); a leaving node is
                   removed from the registry and new nodes arrive per stage as a Poisson
                   process at join_rate. A hop fails when its node has left since the
                   client last talked to it. If a stage has no live replica the client
@@ -65,14 +67,14 @@ class Config:
     hop_time_per_token: float = 3.3e-6
     # Cost of discovering a replacement / re-establishing a stream after a failure.
     # Paid by every strategy on every failure.
-    reconnect_time: float = 2.5
+    reconnect_time: float = 4.5
     # RESTART only: extra cost of a restart that depends on how far the failed attempt
     # got (k = tokens generated). Hypotheses for the paper's 1024/1e-3 cell, see NOTES.md.
     restart_cost_per_token: float = 0.0        # linear in k
     restart_cost_per_token_sq: float = 0.0     # quadratic in k
     # REPLAY only: per-token cost for a replacement stage to rebuild its KV cache from
     # the client-side cache (one batched forward over the prefix, for that stage only).
-    replay_per_token: float = 0.0089
+    replay_per_token: float = 0.008
     # CACHELESS only: per-hop cost of sending and recomputing the whole prefix.
     cacheless_fixed: float = 0.043
     cacheless_per_token: float = 0.00046
@@ -125,6 +127,7 @@ class Stats:
     restarts: int = 0
     replays: int = 0
     replayed_tokens: int = 0
+    replay_sizes: list = field(default_factory=list)  # k at each replay attempt
     waits: int = 0
     wait_time: float = 0.0
     finished: bool = False
@@ -273,6 +276,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
                 yield k * cfg.replay_per_token
                 st.replays += 1
                 st.replayed_tokens += k
+                st.replay_sizes.append(k)
                 st.hops += 1
                 replay_failed = (not replacement.alive) or (p > 0 and rng.random() < p)
                 if not replay_failed:
@@ -287,6 +291,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
                     chain[s] = replacement
                 yield cfg.reconnect_time
             # then fall through and retry hop s for token k+1
+            assert k == 0 or chain[s].cached == k, "replacement cache not rebuilt"  # type: ignore[union-attr]
 
     st.finished = True
     st.elapsed = sim.now
