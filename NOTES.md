@@ -134,8 +134,11 @@ Other observations:
   figures were produced some other way. Worth asking the authors.
 - 1024/1e-3 at 0.48 steps/s is 2133 s per run, 30 hours for 50 repeats of one cell.
 
-Status: left as fixed R in the calibration. Open. Next step is reading the benchmark
-code in the Petals repository for how the restart baseline was actually run.
+Status: left as fixed R in the calibration. Open. The Table 1 harness (BLOOM-7.1B,
+four 1080 Ti stages, the restart and Megatron-DeepSpeed baselines) is not in the
+Petals repository; `benchmarks/benchmark_inference.py` there is the steady-state
+Tables 2/3 benchmark with no failure injection, and nothing else public turns up.
+Closing this means asking the authors.
 
 ### Replay, 128 tokens, p = 1e-4: sim 10.41, paper 11.40
 
@@ -145,7 +148,49 @@ paper's 11.4 (identical to p = 0) almost certainly means zero failures happened.
 with p·S·T ≪ 1 should either use ~1000 seeds or be dropped from the calibration loss.
 Currently they are in the loss with equal weight, which is wrong.
 
-## 4. Reading
+## 4. What the Petals client actually does on failure (from source)
+
+Read from `src/petals/client/inference_session.py` and `routing/sequence_manager.py`
+at commit 22afba6 (Aug 2024). This is what the fitted C = 6 s + 5 ms/token stands for.
+
+Per hop, `InferenceSession.step` tries the server; on any exception:
+
+1. `on_request_failure`: the peer is banned (`ban_timeout = 15 s`, doubling on repeat)
+   and dropped from the routing table. If a block now has no server, the routing
+   state is marked stale.
+2. Retry delay: `0, 1, 2, 4, …` s, capped at 60 (`min_backoff = 1`). The first retry
+   is immediate; only repeated failures on the same hop back off.
+3. `_update_sequence` → `make_sequence(mode="min_latency")`. If the state is stale this
+   first does a synchronous DHT refresh (`get_remote_module_infos(latest=True)`), then
+   shortest-path routing, then opens a new session (`connect_timeout = 5 s`).
+4. The new session inherits `history`, the client-side cache of every input sent to
+   that span. Its first `step` sends the whole history in one request
+   (`inputs = self.history`), so the replacement rebuilds its KV cache in a single
+   batched forward over the prefix. That is the per-token r.
+5. If every server for a block is banned, the ban is ignored ("the error may actually
+   be client-caused"). In the Table 1 setup there is exactly one server per stage, so
+   each injected failure routes straight back to the reset server after the DHT refresh.
+
+So R ≈ DHT refresh + routing + connect, not the backoff, and the 6 s fit is plausible
+for a hivemind DHT lookup with `latest=True` plus session setup on a local network.
+
+Two things the Table 1 experiment does not exercise, and that matter for churn:
+
+- **Detection.** Injected failures raise immediately. A real crash or network partition
+  is detected by `request_timeout = 180 s` unless the transport resets the connection.
+  With detection at 180 s, C ≈ 190 s and λ* = 1/(S·C) drops from 0.029 to about
+  1.3e-3 /s, a mean node lifetime of 13 minutes. Measured P2P session lengths
+  (Stutzbach & Rejaie) have medians in that range. Detection latency is the dominant
+  term in C for real churn, and the obvious defender lever.
+- **Discovery staleness.** Routing information is refreshed every `update_period = 60 s`
+  unless a failure empties a block. A node that joined in the last minute is invisible
+  to a client that hasn't been forced to refresh, which lengthens the empty-stage waits
+  in §2 beyond what the M/M/∞ estimate gives.
+
+Both are one-parameter additions to `Config` (`detect_time`, `registry_lag`) and belong
+in Experiment 2's cut analysis rather than in the Table 1 calibration.
+
+## 5. Reading
 
 1. Ross, *Introduction to Probability Models*, ch. 7, Renewal Theory. The
    renewal-reward theorem is the basis of every expected-time-per-step line above.
