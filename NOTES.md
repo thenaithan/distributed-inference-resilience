@@ -294,20 +294,69 @@ requests completing, at λ = 1e-2 g ≈ 0.8 is enough to stop most. Both λ* fro
 this result say the same thing from different sides: the discovery-and-detection path
 is where a distributed model is thinnest.
 
+### The three cheap omissions, tested (`churnsim/extensions.py`)
+
+**(a) Detection latency.** `detect_time` replaces the one-hop cost of a send to a node
+that has left. With Petals' `request_timeout` of 180 s, C goes from 8.6 s to 189 s and
+the cascade threshold λ* = 1/(S·C) from 0.029 to 1.3e-3 /s; at 30 s it is 6.5e-3. The
+churn sweep collapses where the formula says: with 180 s detection the busy swarm
+(λ = 1e-2) finishes 5 of 100 runs and even λ = 1e-3 (mean lifetime 17 min) loses
+two-thirds of its throughput. Detection latency is the single largest term in C
+under real churn, and it is a client-side constant.
+
+**(b) Client routing cache.** `known_window` lets the client route to nodes it has
+discovered or used within that window, without the discovery layer. Under busy churn
+with the whole discovery layer removed, completion goes from 0.07 (knows only its
+chain) to 0.11 (60 s cache, Petals' refresh period) to 0.17 (remembers everything).
+At g = 0.8: 0.40 → 0.43 → 0.49. The cache softens the discovery cut by a few points,
+not by a category: a remembered replica is only useful while it is alive, and in the
+busy swarm it is not alive for long. The claim "80% of discovery stops more requests
+than 100% of nodes" survives for every cache setting.
+
+**(c) The compute attack: degraded but present nodes.** A `degrade` cut slows a
+fraction f of nodes by 10× while they stay alive and registered. What happens depends
+entirely on the client:
+
+| client                                          | f = 0.3 | f = 0.5 | f = 0.8 | f = 1.0 |
+|-------------------------------------------------|---------|---------|---------|---------|
+| never evicts slow nodes (Petals)                | 3.1×    | 4.8×    | 7.3×    | 9.1×    |
+| naive: evict any hop slower than 3× nominal     | 3.2×†   | 9.2×†   | 19×†    | DNF     |
+| latency-aware: evict only if a faster node is known | 1.4× | 2.2×    | 5.3×    | 9.1×    |
+
+(mean completion time over nominal, unfinished runs at the 20× deadline; † some runs
+unfinished.) Three things to take from it:
+
+- A slowed node never fails, so a client that only re-routes on failure keeps it for
+  the whole session. Petals' only slow-node mechanism is `request_timeout`, 180 s, which
+  for a 20 ms hop means a 9000× slowdown. A 10× tarpit holds a Petals session until it
+  ends. Cost to the attacker: the node stays up and serves, slowly.
+- A naive evictor is worse than no evictor. Each eviction costs a reconnect and a
+  replay (~9 s), and if every replica of a stage is slow it evicts on every hop: at
+  f ≥ 0.9 no run finishes. This is the §2 cascade again, triggered by the client's own
+  policy rather than by churn.
+- A latency-aware evictor, which switches only when it knows somewhere faster, gets
+  the degraded swarm close to the best achievable (every stage on its fastest replica)
+  and converges to the never-evict line only when everything is slow.
+
+So the compute attack does not act through computation. A slowed node hurts exactly
+as much as the routing layer lets it: not at all with good routing and spare
+replicas, by its full factor with Petals' routing, and catastrophically with a bad
+evictor. The thinnest part is still the coordination path; the degrade cut is one
+more way in, not a separate one. Note what it is *not*: it is not a test of corrupted
+outputs (a Byzantine node returning wrong activations), which Petals' Appendix H
+discusses and this model does not represent.
+
 ### Not modelled, and relevant
 
-- Clients cache routing tables (Petals: `update_period = 60 s`) and could keep using
-  known-but-unregistered nodes. Our client knows only its current chain, which makes
-  the registry cut slightly more effective than it would be against Petals. The fix is
-  a `known` set per client with a staleness window; cheap to add.
-- The registry here is a single oracle with per-entry loss. A real DHT loses entries
-  as a function of which nodes are removed, so a node cut and a registry cut are
+- The registry is a single oracle with per-entry loss. A real DHT loses entries as a
+  function of which nodes are removed, so a node cut and a registry cut are
   correlated; "remove fraction g of the DHT" is a lower bound on the damage a node
   cut does to discovery. In Petals the DHT runs on the same hivemind peers as the
-  servers.
-- Detection latency is one hop time (the lost node is noticed on the next send). With
-  a 180 s timeout the registry-cut hazard is unchanged but every heal takes longer.
-- One request, one client. Many concurrent clients contend for the same joiners.
+  servers. Experiment 2b.
+- One request, one client. Many concurrent clients contend for the same joiners and
+  the same fast replicas, which would sharpen (a), (b) and (c).
+- Byzantine nodes (wrong outputs) are a different threat and need output validation
+  in the model.
 
 ## 6. Reading
 
