@@ -346,17 +346,72 @@ more way in, not a separate one. Note what it is *not*: it is not a test of corr
 outputs (a Byzantine node returning wrong activations), which Petals' Appendix H
 discusses and this model does not represent.
 
+### The two structural omissions, tested (`churnsim/exp2b.py`)
+
+**(a) Discovery held on the server nodes.** With `dht_k = 3`, each node's entry lives
+on three other nodes and is discoverable only while one of them is alive; nodes
+republish every 60 s (also tested: 600 s and never). A node cut then also destroys the
+entries whose holders all died, a fraction f³ of the survivors' entries.
+
+Result: almost nothing changes. Static swarm, node cut: P(complete) moves from 0.48 to
+0.46 at f = 0.5 and from 0.04 to 0.02 at f = 0.8, with no republishing at all. Busy
+swarm: completion stays at 1.0 and time-to-complete moves by under 10%. The reason is
+arithmetic: to lose an entry you must kill all k of its holders, so the discovery
+damage from a node cut is f^k, which at k = 3 is small until f is large, and by then
+the node cut itself has done the work. libp2p's Kademlia uses k = 20; hivemind's DHT
+replicates similarly.
+
+This sharpens the Experiment 2 result rather than softening it. The oracle registry
+was not hiding a vulnerability; the opposite. **A discovery layer that lives on the
+nodes cannot be cut by removing nodes**: node removal reaches it only as f^k. The
+registry cut in Experiment 2 (entries hidden, joiners unregistered) therefore
+corresponds to an attack on the DHT *protocol*, not on its hosts: eclipse, Sybil, key
+poisoning, or partitioning the overlay. Those are the cheapest cuts in this model, but
+they are a different kind of operation from taking machines offline, and the model
+says nothing about how hard they are.
+
+**(b) Concurrent clients.** M clients run on the same swarm; a node serving L clients
+runs (1 + α·(L − 1)) times slower, with α = 0.05 (Petals Table 3: 10 clients on 10
+servers get 1.17 vs 1.65 steps/s alone, so ~0.045 per client with GPU batching) and
+α = 0.3 (weak batching). Busy swarm, per-client outcomes, 50 runs for M ≤ 5 and 10
+runs × 20 clients for M = 20:
+
+| cut            | M=1        | M=5, α=.05 | M=20, α=.05 | M=5, α=.3  | M=20, α=.3  |
+|----------------|------------|------------|-------------|------------|-------------|
+| nodes 50%      | 1.00, 2.5× | 1.00, 2.9× | 1.00, 4.5×  | 1.00, 4.7× | 0.60, 17×†  |
+| nodes 100%     | 1.00, 3.1× | 1.00, 4.1× | 1.00, 4.9×  | 1.00, 6.3× | 0.68, 18×†  |
+| stage          | 1.00, 2.4× | 1.00, 2.5× | 1.00, 4.6×  | 1.00, 4.8× | 0.72, 16×†  |
+| registry 80%   | 0.38, 16×† | 0.40, 14×† | 0.06, 19×†  | 0.00, DNF  | 0.00, DNF   |
+| registry 100%  | 0.08, 18×† | 0.00, DNF  | 0.00, DNF   | 0.00, DNF  | 0.00, DNF   |
+
+(P(complete), mean time over nominal; † unfinished clients at the 20× deadline.)
+
+Three things:
+
+- Node and stage cuts still heal with Petals-like batching (α = 0.05), but the heal
+  costs 20 clients 4.5 to 4.9× nominal instead of 2.4 to 3.1×, because the first
+  joiner on an emptied stage receives all twenty of them.
+- The discovery cut gets much worse with load: at 80% removed, per-client completion
+  goes from 0.38 (one client) to 0.06 (twenty clients, α = 0.05), and to zero at any
+  M > 1 with α = 0.3. Fewer discoverable replicas means each one carries more clients,
+  which slows every generation, which lengthens t_remaining in exp(−S·λ·t), which
+  loses more chains. Load is a third feedback loop alongside the two in §2 and §5(c).
+- Without batching (α = 0.3), twenty clients turn even a plain node cut into a 30 to
+  40% loss: the swarm heals, but the few live nodes run 6.7× slower under the pile-on,
+  generations take long enough for churn to break them again, and a third of clients
+  never finish. This is the §2 cascade with load as the multiplier instead of
+  detection time.
+
+So concurrency sharpens every result, and most of all the discovery one.
+
 ### Not modelled, and relevant
 
-- The registry is a single oracle with per-entry loss. A real DHT loses entries as a
-  function of which nodes are removed, so a node cut and a registry cut are
-  correlated; "remove fraction g of the DHT" is a lower bound on the damage a node
-  cut does to discovery. In Petals the DHT runs on the same hivemind peers as the
-  servers. Experiment 2b.
-- One request, one client. Many concurrent clients contend for the same joiners and
-  the same fast replicas, which would sharpen (a), (b) and (c).
 - Byzantine nodes (wrong outputs) are a different threat and need output validation
-  in the model.
+  in the model. Petals' Appendix H discusses validator peers and running disjoint
+  chains and comparing; neither is implemented in the public client.
+- The DHT protocol attacks that the registry cut stands for (eclipse, Sybil,
+  poisoning) are not modelled; the model gives their effect, not their cost.
+- Node lifetimes are exponential; measured P2P session lengths are heavy-tailed.
 
 ## 6. Reading
 
