@@ -157,6 +157,26 @@ def test_dht_entries_die_with_their_holders_and_republish_restores_them():
     assert reg.entry_alive(target) and target in reg.discoverable(0)
 
 
+def test_load_nets_to_zero_after_all_clients_finish():
+    from churnsim.model import Cut, Registry, simulate_all, _client  # noqa: F401
+    import churnsim.model as m
+    seen = {}
+    orig = m.Registry.__init__
+    def spy(self, dht_k=0):
+        orig(self, dht_k); seen["reg"] = self
+    m.Registry.__init__ = spy
+    try:
+        cfg = Config(stages=3, seq_len=200, replicas=2, hop_time=0.01, reconnect_time=0.1,
+                     replay_per_token=0.0001, clients=6, load_alpha=0.2, leave_rate=0.02,
+                     join_rate=0.04, detect_time=0.5, time_budget=2000.0,
+                     cut=Cut(time=1.0, kind="nodes", amount=0.5), seed=5)
+        sts = simulate_all(cfg, Strategy.REPLAY)
+    finally:
+        m.Registry.__init__ = orig
+    assert all(st.finished for st in sts)
+    assert all(n.load == 0 for n in seen["reg"].all_nodes())
+
+
 def test_concurrent_clients_share_load_and_all_finish():
     from churnsim.model import simulate_all
     cfg = Config(stages=2, seq_len=100, replicas=1, hop_time=0.01, reconnect_time=0.1,
