@@ -148,3 +148,4 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
       quadratic, neither fits all five cells (NOTES.md §3); left as fixed R, still open
 - [ ] drop or heavily re-seed the p·S·T ≪ 1 cells in the calibration loss
 - [ ] heavy-tailed (Weibull) node lifetimes in churn mode
+- [ ] `detect_time` and `registry_lag` in `Config` (NOTES.md §4); exponential retry backoff
