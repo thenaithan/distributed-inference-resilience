@@ -32,6 +32,9 @@ for `cacheless`, matching the paper's numbers around p = 1e-2.
   replay cost per token.
 - `churnsim/sweep.py` – throughput vs p for all strategies and both sequence lengths.
 - `churnsim/churn.py` – the bridge from node leave rate λ to an effective per-hop p.
+- `churnsim/analytic.py` – closed-form model of all three strategies, checked against the sweep.
+- `churnsim/restart_variants.py` – tests fixed / linear / quadratic restart-cost hypotheses.
+- `NOTES.md` – derivations, the churn threshold λ* = 1/(S·C), discrepancies, reading list.
 - `tests/` – sanity checks; `python -m tests.test_model` (or `pytest`).
 
 ## Quick start
@@ -141,4 +144,7 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
 - [x] sweep p from 0 to 5e-2 and plot (Appendix F shape)
 - [x] map `leave_rate` / `join_rate` to an effective per-hop p (the bridge to Experiment 2)
 - [x] tests
-- [ ] optional: restart cost proportional to tokens generated before failure
+- [x] restart cost proportional to tokens generated before failure: tested linear and
+      quadratic, neither fits all five cells (NOTES.md §3); left as fixed R, still open
+- [ ] drop or heavily re-seed the p·S·T ≪ 1 cells in the calibration loss
+- [ ] heavy-tailed (Weibull) node lifetimes in churn mode
