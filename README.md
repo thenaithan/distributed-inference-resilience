@@ -216,6 +216,84 @@ NOTES.md §5 has the derivations, the n = 10 comparison, and what remains unmode
 (Byzantine outputs; the cost of the DHT attacks the registry cut stands for;
 heavy-tailed lifetimes).
 
+## Conclusion
+
+The fault-tolerance result of the Petals paper was reproduced. It was found that with
+reroute-and-replay the throughput degrades linearly in the per-hop failure probability.
+Restart-from-scratch collapses once a generation expects about one failure, which
+happens at p ≈ 1/(S·T). The replay strategy matched the Petals paper within 5% at
+p = 1e-2. However, one cell of the paper's restart baseline (1024 tokens, p = 1e-3)
+reports 1.9x lower throughput than our model, and none of the cost models we tried
+reproduce it. The paper's harness is not public, so this will stay open for now.
+
+Seven results were found that went further than the paper.
+
+1. Under node churn, the recovery time feeds back to the rate of failure. This leads to
+   an increase in failure rate during the recovery time. Once S·λ·C exceeds 1, this
+   leads to a catastrophic cascade as failures will occur faster than they are
+   repaired. The threshold λ* = 1/(S·C) is set by C, the time to detect a failure, find
+   a replacement and replay the prefix.
+2. The cut that will lead to the stopping of the request is heavily dependent on
+   whether the swarm self-heals. The target for a static swarm would be the complete
+   stage of replicas (n nodes); in this case the discovery layer can be removed
+   entirely without effect, since the connected chain has no need for looking up new
+   nodes as none ever leave. When the swarm is under churn with joins, the node cuts
+   can heal within about H_S / join_rate. Losing discovery leaves every in-flight
+   request to survive on its current chain, P = exp(−S·λ·t), where t is the time
+   remaining in the generation. This is not dependent on the number of replicas in
+   existence. At λ = 1e-2, more requests get stopped by removing 80% of the discovery
+   than by removing 100% of the nodes.
+3. During simulation we also took into consideration the detection latency. On Petals,
+   the default setting is 180 s for the timeout. Under this configuration C goes from
+   8.6 s to 189 s and λ* from 0.029 to 1.3e-3 /s, exactly where 1/(S·C) puts it: that
+   is where the sweep collapses. At λ = 1e-3 (mean lifetime 17 min) two-thirds of
+   throughput is already gone. Under real churn this client-side constant is the
+   largest term in C.
+4. When providing a routing cache to the client the discovery cut did soften slightly,
+   but only by a few points. When the discovery is taken down from a busy swarm the
+   completion rate goes up from 0.07 to 0.11 (60 s cache, Petals) and only moves up to
+   0.17 if the cache were perfect. This is due to the cache not being any use if the
+   replica it is pointing to has already left. "80% of discovery stops more requests
+   than 100% of nodes" holds at every cache setting.
+5. In the compute attack we simulated what would happen if a specific node was slowed
+   down. A node that is slowed but stays registered is never detected as failed. A node
+   slowed 10x never fails, so a client that re-routes only on failure, which is what
+   Petals does, keeps it for the whole session and pays the full slowdown (9.1x at
+   f = 1). The obvious defence against this was an evictor for slow nodes, but a naive
+   evictor (switch on any slow hop) is actually worse than no defence at all. When all
+   the replicas within a stage are slow, it evicts on every hop, and this causes no run
+   to finish once f ≥ 0.9. The best defence against the compute attack was a
+   latency-aware evictor (switch only when a faster node is known). So even though the
+   attack succeeds by attacking the computation, the reason it succeeds is due to the
+   routing rules. This is not a test of nodes returning wrong outputs, which the model
+   does not represent.
+6. Distributing the discovery layer across the server nodes (DHT) makes it highly
+   resilient. Since each entry is held on k nodes, removing a fraction f of the nodes
+   destroys only a fraction f^k of the entries; even an 80% node cut barely changes the
+   outcome relative to the oracle registry. In the static swarm at f = 0.5 this moves
+   0.58 → 0.48 and at f = 0.8 it moves 0.07 → 0.02. It has no effect on the busy
+   swarm. Therefore, the "registry cut" found cheapest earlier cannot be achieved by
+   simply removing host nodes. It corresponds to an attack on the DHT protocol itself
+   (eclipse, Sybil, partitioning). The model gives the effect of such an attack, not
+   its cost.
+7. Concurrent client load acts as a third feedback loop, amplifying the damage of cuts.
+   While node and stage cuts still heal under Petals-like batching, the recovery time
+   penalty rises from 2.4 to 3.3x (one client) to 3.8 to 5.1x (twenty clients), because
+   the first replacement node on an emptied stage receives every client that lost that
+   stage. More critically, load makes a discovery cut far more effective. Fewer
+   discoverable replicas force more clients onto each survivor, slowing generations
+   and increasing the exposure time t in exp(−S·λ·t). At 80% of discovery removed, the
+   per-client completion rate drops from 0.38 (one client) to 0.27 (five) to 0.10
+   (twenty) with Petals-like batching, and to zero at twenty clients with weak
+   batching.
+
+So all results point to the same point of failure: the detection-and-discovery path is
+thinner than the computation it coordinates, and of the cuts tested this was the
+cheapest, as long as you can reach the DHT. Reaching it means attacking the DHT
+protocol, not removing its hosts, and this work measures the effect of that attack,
+not its cost. Not modelled: nodes returning wrong outputs, the cost of those DHT
+attacks, and heavy-tailed node lifetimes.
+
 ## Status
 
 - [x] simulator with three strategies and both failure models
