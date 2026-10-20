@@ -1,9 +1,15 @@
-# research-sharding-churnsim
+# distributed-inference-resilience
 
-Experiment 1 of the distributed-inference resilience plan: a discrete-event simulation
-of pipeline-parallel inference under node churn, calibrated against the fault-tolerance
-experiment in the Petals paper (Borzunov et al., arXiv:2312.08361, Table 1 and
-Appendix F).
+Experiments on how a large model running split across many machines copes with nodes
+failing and leaving, studied from the operator's and defender's side. The open
+questions come from the essay *Anatomy of an Asymmetric Persistence Mechanism*
+(naithanweigh.com/writing/asymmetric-persistence/).
+
+## Experiment 1: churn simulation (`churnsim/`)
+
+A discrete-event simulation of pipeline-parallel inference under node churn,
+calibrated against the fault-tolerance experiment in the Petals paper (Borzunov et
+al., arXiv:2312.08361, Table 1 and Appendix F).
 
 No real weights. Tokens move hop by hop through a pipeline of stages; hops cost time and
 can fail; three recovery strategies are compared:
