@@ -1,6 +1,6 @@
 """Bridge from node churn (leave rate lambda) to the per-hop failure probability p.
 
-Petals varies p directly. Nat's plan and Experiment 2 are phrased in terms of nodes
+Petals varies p directly. The experiment plan and Experiment 2 are phrased in terms of nodes
 leaving at a rate lambda. The two are related by how often the client touches a node:
 a node contacted once per generation step, with lifetime Exp(lambda), has died since
 the last contact with probability
