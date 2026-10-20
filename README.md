@@ -310,7 +310,7 @@ is present in all of them.
 - **Checkpointed KV state** is the alternative those systems are moving to: DéjàVu
   streams each request's KV cache to a neighbouring worker, LUMEN to a load-chosen
   holder. This is the same mechanism as Petals' reroute-and-replay with the cache held
-  server-side instead of client-side, so the linear-in-$p$ curve and the cascade
+  server-side instead of client-side, so the curve that is linear in $p$ and the cascade
   threshold $\lambda^* = 1/(S C)$ apply with a different $C$.
 - **Detection** in LUMEN is a gateway health check with no stated latency, the same gap
   that Experiment 2's `detect_time` sweep is about.
@@ -325,7 +325,7 @@ is present in all of them.
   all of them.
 
 What a modern stack changes is the numbers in $C$, not the structure. Measuring $C$ on
-one of these stacks is the next calibration (see Experiment 4 in the plan).
+one of these stacks is scheduled as a next experiment.
 
 References: [LUMEN, arXiv:2606.17787](https://arxiv.org/abs/2606.17787);
 [vLLM PR #56430, KV-transfer fault tolerance](https://github.com/vllm-project/vllm/pull/56430);
