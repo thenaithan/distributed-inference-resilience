@@ -24,7 +24,7 @@ Two failure models are supported and can be combined:
                   removed from the registry and new nodes arrive per stage as a Poisson
                   process at join_rate. A hop fails when its node has left since the
                   client last talked to it. If a stage has no live replica the client
-                  waits, polling the registry. This is the model from Nat's plan, and
+                  waits, polling the registry. This is the model from the experiment plan, and
                   the one Experiment 2 (minimum cut) builds on.
 
 The event loop is a plain heap scheduler with generator-based processes (yield a

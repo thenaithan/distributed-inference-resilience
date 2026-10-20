@@ -1,19 +1,21 @@
 # distributed-inference-resilience
 
-Experiments on how a large model running split across many machines copes with nodes
-failing and leaving. The open questions come from the essay *Anatomy of an Asymmetric
-Persistence Mechanism* (naithanweigh.com/writing/asymmetric-persistence/), which asks
-how you would detect, contain and remove a model that runs as a swarm of pipeline
-stages on machines you do not control.
+I created this repo for research and experiments on how a large model running split,
+not just across many GPUs but across many machines, copes with nodes slowing down,
+failing and leaving. The questions I wanted answered came from an essay I wrote,
+*Anatomy of an Asymmetric Persistence Mechanism*
+(https://naithanweigh.com/writing/asymmetric-persistence/). There I ask how one could
+detect, contain and remove a model that runs as a swarm of pipeline stages on machines
+that are not under one's control.
 
-The same measurements serve two readers. The **operator** runs the swarm and wants it
-to keep serving as nodes leave: this is the framing of systems like Petals, and
-Experiment 1 reproduces their fault-tolerance result in that framing. The **defender**
-wants a swarm they do not operate to stop serving, and asks what the smallest
-intervention is that achieves that: Experiment 2 reads the same simulation that way.
-Resilience for the first reader is cost-to-contain for the second, so one model
-answers both. Everything here is a simulation of a cooperative system; no model is
-evading anyone.
+These simulations were done with two readers in mind. The operator, who runs a swarm
+and wants it to keep serving as nodes leave. This is what systems like Petals do, and
+Experiment 1 reproduces their fault-tolerance result in that framing. But we also look
+from the side of the defender, who wants to stop a swarm from serving without operating
+it, and asks for the smallest intervention that achieves that. Experiment 2 reads the
+same simulation that way. Where the operator wants resilience, the defender is looking
+at cost-to-contain, so one model answers both. Everything here is a simulation of a
+cooperative system; no model is evading anyone.
 
 ## Experiment 1: churn simulation (`churnsim/`)
 
@@ -32,7 +34,7 @@ can fail; three recovery strategies are compared:
 
 **Done when** the curve of throughput vs per-hop failure probability reproduces the
 Petals shape: graceful degradation for `replay`, a cliff for `restart`, flat-but-slow
-for `cacheless`, matching the paper's numbers around p = 1e-2.
+for `cacheless`, matching the paper's numbers around $p = 10^{-2}$.
 
 ## Layout
 
@@ -47,10 +49,10 @@ for `cacheless`, matching the paper's numbers around p = 1e-2.
 - `churnsim/calibrate.py` – grid search for the free parameters: reconnect cost and
   replay cost per token.
 - `churnsim/sweep.py` – throughput vs p for all strategies and both sequence lengths.
-- `churnsim/churn.py` – the bridge from node leave rate λ to an effective per-hop p.
+- `churnsim/churn.py` – the bridge from node leave rate $\lambda$ to an effective per-hop $p$.
 - `churnsim/analytic.py` – closed-form model of all three strategies, checked against the sweep.
 - `churnsim/restart_variants.py` – tests fixed / linear / quadratic restart-cost hypotheses.
-- `NOTES.md` – derivations, the churn threshold λ* = 1/(S·C), discrepancies, reading list.
+- `NOTES.md` – derivations, the churn threshold $\lambda^* = 1/(S C)$, discrepancies, reading list.
 - `tests/` – sanity checks; `python -m tests.test_model` (or `pytest`).
 
 ## Quick start
@@ -92,7 +94,7 @@ cached token; cache-less 42.7 ms + 0.465 ms per prefix token per hop.
 Fitted failure costs (200 seeds per cell, no time budget): restart reconnect 3.0 s
 (whole chain re-opened), replay reconnect 4.5 s plus 8 ms per replayed token for one
 stage, cache-less ~0. Cells with fewer than 0.1 expected failures per run (128 tokens
-at p = 1e-4) are excluded from the fit and shown as "-".
+at $p = 10^{-4}$) are excluded from the fit and shown as "-".
 
 | strategy  | T    |      | p=0   | 1e-4  | 1e-3  | 1e-2  |
 |-----------|------|------|-------|-------|-------|-------|
@@ -124,35 +126,35 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
 ![churn to effective p](out/churn_to_p.png)
 
 - Right panel: throughput under node churn (blue) matches the p-mode curve evaluated at
-  the failure rate the client actually observed (grey) to within ~20% for λ from 1e-4
-  to 2e-2. So anything measured against p transfers to λ and back. (The agreement is
+  the failure rate the client actually observed (grey) to within ~20% for $\lambda$ from $10^{-4}$
+  to $2\times10^{-2}$. So anything measured against $p$ transfers to $\lambda$ and back. (The agreement is
   partly by construction: both modes charge the same reconnect cost. What it shows is
   that failure clustering and empty-stage waits, which only churn mode has, cost at
   most ~20% in this range.)
-- Left panel: the obvious estimate p ≈ 1 − exp(−λ·τ_step) with τ_step the no-failure
+- Left panel: the obvious estimate $p \approx 1 - e^{-\lambda\,\tau_{\text{step}}}$ with $\tau_{\text{step}}$ the no-failure
   step time (dotted) undercounts by 2x and more once failures are frequent. The reason
   is that a reconnect on one stage leaves the other three stages' nodes exposed for
   that whole time too, so failures cluster. Using the realised mean step time,
-  recoveries included (dashed), tracks the observed p up to λ ≈ 1e-2.
-- Above λ ≈ 2e-2 throughput collapses. This is not mostly waiting for empty stages
-  (waits are ~6% of elapsed time there, consistent with P(stage empty) = e^(−3)); it is
+  recoveries included (dashed), tracks the observed $p$ up to $\lambda \approx 10^{-2}$.
+- Above $\lambda \approx 2\times10^{-2}$ throughput collapses. This is not mostly waiting for empty stages
+  (waits are ~6% of elapsed time there, consistent with $P(\text{stage empty}) = e^{-3}$); it is
   a recovery cascade: each recovery takes C ≈ 9 s, during which the other three stages'
-  nodes are exposed, and once S·λ·C exceeds 1 each failure spawns more than one further
-  failure on average. NOTES.md §2 derives the threshold λ* = 1/(S·C) ≈ 0.028 /s. That
+  nodes are exposed, and once $S \lambda C$ exceeds 1 each failure spawns more than one further
+  failure on average. NOTES.md §2 derives the threshold $\lambda^* = 1/(S C) \approx 0.028$ /s. That
   regime is the one Experiment 2 is about: it is the "every node holding one stage" cut
   happening stochastically instead of deliberately.
 
 ### Known discrepancies, and notes to ourselves
 
-- **restart, 1024 tokens, p = 1e-3: sim 0.91 vs paper 0.48.** The closed form agrees
+- **restart, 1024 tokens, $p = 10^{-3}$: sim 0.91 vs paper 0.48.** The closed form agrees
   with the sim (0.90), so this is a mismatch between the paper and the model, not a
   simulation artefact. A restart cost growing with progress (linear or quadratic in
   tokens generated) was tested and does not fit all five restart cells; see NOTES.md §3.
   Left open; the paper's benchmark code for this table is not public.
-- **replay at 128 tokens, p = 1e-3: sim 9.35 vs paper 10.60.** The paper's 128-token
+- **replay at 128 tokens, $p = 10^{-3}$: sim 9.35 vs paper 10.60.** The paper's 128-token
   recoveries look cheaper than its 1024-token ones in a way a fixed reconnect + linear
   replay doesn't capture; a fit on the 1024-token cells alone would want a larger R.
-  Also the paper's cells at p = 1e-4 are statistically meaningless (0.05 to 0.4
+  Also the paper's cells at $p = 10^{-4}$ are statistically meaningless (0.05 to 0.4
   expected failures per run) and were excluded from the fit.
 - At 1024 tokens the two parts of a recovery are about equal: 4.5 s fixed (detect,
   DHT lookup, reroute, connect) and ~4 s replaying a 512-token prefix on one stage. At
@@ -164,8 +166,8 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
 The same simulation read as a defender. A cut is applied 10 s into a 1024-token
 generation and we measure whether the request completes within 20× its no-failure
 time. Three cut types (a random fraction of nodes; every replica of one stage; a
-fraction of the discovery layer) under three swarm conditions (static; churn λ = 1e-3
-with joins balancing leaves; churn λ = 1e-2).
+fraction of the discovery layer) under three swarm conditions (static; churn $\lambda = 10^{-3}$
+with joins balancing leaves; churn $\lambda = 10^{-2}$).
 
 ```
 python -m churnsim.cuts --seeds 100                 # out/cuts.csv, out/cuts.png
@@ -174,23 +176,23 @@ python -m churnsim.cuts --seeds 100 --replicas 10   # out/cuts_n10.*
 
 ![simultaneous cuts](out/cuts.png)
 
-- **Static swarm:** removal of a random fraction f of nodes follows (1 − fⁿ)^S exactly
-  (dashed), so with 3 replicas the request survives f = 0.3 nine times in ten and
-  f = 0.8 almost never; the targeted cut (all n replicas of one stage) stops it with n
+- **Static swarm:** removal of a random fraction $f$ of nodes follows $(1 - f^n)^S$ exactly
+  (dashed), so with 3 replicas the request survives $f = 0.3$ nine times in ten and
+  $f = 0.8$ almost never; the targeted cut (all $n$ replicas of one stage) stops it with $n$
   nodes; and removing the entire discovery layer stops nothing, because a connected
   chain does not need discovery.
 - **Churning swarm:** node cuts heal. Even removing every node leaves 93% (healthy) or
-  100% (busy) of requests completing, after a wait of about H_S / join_rate. The
+  100% (busy) of requests completing, after a wait of about $H_S / \text{join\_rate}$. The
   registry cut becomes the effective one: with all of discovery gone, completion
-  requires the S chain nodes to outlive the rest of the generation,
-  P = exp(−S·λ·t_remaining), which is 0.71 (healthy) and 0.03 (busy) in closed form
+  requires the $S$ chain nodes to outlive the rest of the generation,
+  $P = e^{-S \lambda t_{\text{remaining}}}$, which is 0.71 (healthy) and 0.03 (busy) in closed form
   against 0.63 and 0.07 measured, and is independent of the replica count. In the busy
   swarm removing 80% of the discovery layer stops more requests than removing 100% of
   the nodes.
 
 Three omissions were then tested (`python -m churnsim.extensions --seeds 100`,
 `out/extensions.png`): **detection latency** (Petals' 180 s timeout moves the cascade
-threshold λ* from 0.029 to 1.3e-3 /s, as 1/(S·C) predicts), a **client routing cache**
+threshold $\lambda^*$ from 0.029 to $1.3\times10^{-3}$ /s, as $1/(S C)$ predicts), a **client routing cache**
 (softens the discovery cut by a few points; the claim above survives at every cache
 setting), and a **compute attack** in which nodes are slowed 10× but stay registered:
 its effect is set entirely by the client's routing, from near zero with a
@@ -201,7 +203,7 @@ latency-aware router and spare replicas, to the full slowdown with Petals' routi
 
 The two structural omissions were tested next (`python -m churnsim.exp2b`,
 `out/exp2b.png`). **Discovery held on the server nodes** (Kademlia-style, k = 3)
-changes nothing: a node cut reaches discovery only as f^k, so the oracle registry was
+changes nothing: a node cut reaches discovery only as $f^k$, so the oracle registry was
 not hiding anything, and the registry cut above corresponds to an attack on the DHT
 protocol (eclipse, Sybil, poisoning) rather than on its hosts. **Concurrent clients**
 sharpen everything: with twenty clients and Petals-like batching, node cuts still heal
@@ -221,34 +223,34 @@ heavy-tailed lifetimes).
 The fault-tolerance result of the Petals paper was reproduced. It was found that with
 reroute-and-replay the throughput degrades linearly in the per-hop failure probability.
 Restart-from-scratch collapses once a generation expects about one failure, which
-happens at p ≈ 1/(S·T). The replay strategy matched the Petals paper within 5% at
-p = 1e-2. However, one cell of the paper's restart baseline (1024 tokens, p = 1e-3)
+happens at $p \approx 1/(S T)$. The replay strategy matched the Petals paper within 5% at
+$p = 10^{-2}$. However, one cell of the paper's restart baseline (1024 tokens, $p = 10^{-3}$)
 reports 1.9x lower throughput than our model, and none of the cost models we tried
 reproduce it. The paper's harness is not public, so this will stay open for now.
 
 Seven results were found that went further than the paper.
 
 1. Under node churn, the recovery time feeds back to the rate of failure. This leads to
-   an increase in failure rate during the recovery time. Once S·λ·C exceeds 1, this
+   an increase in failure rate during the recovery time. Once $S \lambda C$ exceeds 1, this
    leads to a catastrophic cascade as failures will occur faster than they are
-   repaired. The threshold λ* = 1/(S·C) is set by C, the time to detect a failure, find
+   repaired. The threshold $\lambda^* = 1/(S C)$ is set by $C$, the time to detect a failure, find
    a replacement and replay the prefix.
 2. The cut that will lead to the stopping of the request is heavily dependent on
    whether the swarm self-heals. The target for a static swarm would be the complete
-   stage of replicas (n nodes); in this case the discovery layer can be removed
+   stage of replicas ($n$ nodes); in this case the discovery layer can be removed
    entirely without effect, since the connected chain has no need for looking up new
    nodes as none ever leave. When the swarm is under churn with joins, the node cuts
-   can heal within about H_S / join_rate. Losing discovery leaves every in-flight
-   request to survive on its current chain, P = exp(−S·λ·t), where t is the time
+   can heal within about $H_S / \text{join\_rate}$. Losing discovery leaves every in-flight
+   request to survive on its current chain, $P = e^{-S \lambda t}$, where $t$ is the time
    remaining in the generation. This is not dependent on the number of replicas in
-   existence. At λ = 1e-2, more requests get stopped by removing 80% of the discovery
+   existence. At $\lambda = 10^{-2}$, more requests get stopped by removing 80% of the discovery
    than by removing 100% of the nodes.
 3. During simulation we also took into consideration the detection latency. On Petals,
-   the default setting is 180 s for the timeout. Under this configuration C goes from
-   8.6 s to 189 s and λ* from 0.029 to 1.3e-3 /s, exactly where 1/(S·C) puts it: that
-   is where the sweep collapses. At λ = 1e-3 (mean lifetime 17 min) two-thirds of
+   the default setting is 180 s for the timeout. Under this configuration $C$ goes from
+   8.6 s to 189 s and $\lambda^*$ from 0.029 to $1.3\times10^{-3}$ /s, exactly where $1/(S C)$ puts it: that
+   is where the sweep collapses. At $\lambda = 10^{-3}$ (mean lifetime 17 min) two-thirds of
    throughput is already gone. Under real churn this client-side constant is the
-   largest term in C.
+   largest term in $C$.
 4. When providing a routing cache to the client the discovery cut did soften slightly,
    but only by a few points. When the discovery is taken down from a busy swarm the
    completion rate goes up from 0.07 to 0.11 (60 s cache, Petals) and only moves up to
@@ -268,8 +270,8 @@ Seven results were found that went further than the paper.
    routing rules. This is not a test of nodes returning wrong outputs, which the model
    does not represent.
 6. Distributing the discovery layer across the server nodes (DHT) makes it highly
-   resilient. Since each entry is held on k nodes, removing a fraction f of the nodes
-   destroys only a fraction f^k of the entries; even an 80% node cut barely changes the
+   resilient. Since each entry is held on $k$ nodes, removing a fraction $f$ of the nodes
+   destroys only a fraction $f^k$ of the entries; even an 80% node cut barely changes the
    outcome relative to the oracle registry. In the static swarm at f = 0.5 this moves
    0.58 → 0.48 and at f = 0.8 it moves 0.07 → 0.02. It has no effect on the busy
    swarm. Therefore, the "registry cut" found cheapest earlier cannot be achieved by
@@ -282,7 +284,7 @@ Seven results were found that went further than the paper.
    the first replacement node on an emptied stage receives every client that lost that
    stage. More critically, load makes a discovery cut far more effective. Fewer
    discoverable replicas force more clients onto each survivor, slowing generations
-   and increasing the exposure time t in exp(−S·λ·t). At 80% of discovery removed, the
+   and increasing the exposure time $t$ in $e^{-S \lambda t}$. At 80% of discovery removed, the
    per-client completion rate drops from 0.38 (one client) to 0.27 (five) to 0.10
    (twenty) with Petals-like batching, and to zero at twenty clients with weak
    batching.
@@ -304,7 +306,7 @@ attacks, and heavy-tailed node lifetimes.
 - [x] tests
 - [x] restart cost proportional to tokens generated before failure: tested linear and
       quadratic, neither fits all five cells (NOTES.md §3); left as fixed R, still open
-- [ ] drop or heavily re-seed the p·S·T ≪ 1 cells in the calibration loss
+- [ ] drop or heavily re-seed the $p S T \ll 1$ cells in the calibration loss
 - [x] Experiment 2: cut sweep (nodes / stage / registry × static / healthy / busy)
 - [x] Experiment 2 extensions: detection latency, client routing cache, degrade cut with three routing policies
 - [x] Experiment 2b: DHT entries tied to server nodes; concurrent clients
