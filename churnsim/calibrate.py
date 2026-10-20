@@ -11,9 +11,15 @@ p=0 columns in petals.py. What remains free is what a failure costs:
 The strategies share no fitted parameter, so each is fitted on its own cells. The
 restart cell the paper reports as DNF (1024 tokens, p=1e-2) is skipped: completing
 4096 consecutive hops at p=1e-2 has probability ~1e-18, so it is DNF by construction
-and simulating it only burns the time budget.
+and simulating it only burns the time budget. Cells with p*S*T < 0.1 (128 tokens at
+p=1e-4: 0.05 expected failures per run) are also skipped: with any feasible number of
+repeats they measure the random number generator, not the model.
 
-Run:  python -m churnsim.calibrate [--seeds 30] [--json out/calibration.json]
+Calibration runs with no time budget, so no cell is censored, and with many seeds:
+a 30-seed fit was found to be biased by ~18% on the 128-token cells (seeds 0..29
+happen to draw fewer failures than nominal), which inflated the fitted reconnect.
+
+Run:  python -m churnsim.calibrate [--seeds 200] [--json out/calibration.json]
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 from .model import Strategy, run_many
-from .petals import FAILURE_RATES, SEQ_LENS, TABLE1, base_costs_from_p0, config_for
+from .petals import FAILURE_RATES, SEQ_LENS, STAGES, TABLE1, base_costs_from_p0, config_for
 
 Cells = Dict[Tuple[Strategy, int, float], Optional[float]]
 
@@ -41,8 +47,11 @@ def predict_strategy(strat: Strategy, reconnect: float, replay_per_token: float,
             if TABLE1[(strat, T)][p] is None:
                 out[(strat, T, p)] = None  # DNF by construction, see module docstring
                 continue
+            if p * STAGES * T < 0.1:
+                continue  # too few failures to measure, see module docstring
             cfg = config_for(strat, T, p, reconnect_time=reconnect,
-                             replay_per_token=replay_per_token, base=base)
+                             replay_per_token=replay_per_token, base=base,
+                             time_budget=1e9)
             out[(strat, T, p)] = run_many(cfg, strat, seeds=seeds).mean_steps_per_s
     return out
 
@@ -66,7 +75,7 @@ def fit(seeds: int, base, verbose: bool = True) -> Tuple[Dict[str, float], Cells
 
     # restart: one parameter
     best = None
-    for rc in [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]:
+    for rc in [1.0, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]:
         P = predict_strategy(Strategy.RESTART, rc, 0.0, seeds, base)
         L = loss(P)
         if verbose:
@@ -78,8 +87,8 @@ def fit(seeds: int, base, verbose: bool = True) -> Tuple[Dict[str, float], Cells
 
     # replay: two parameters
     best = None
-    for rc, rpt in itertools.product([2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
-                                     [0.0, 0.0025, 0.005, 0.01, 0.02]):
+    for rc, rpt in itertools.product([2.0, 3.0, 4.0, 4.5, 5.0, 6.0, 8.0],
+                                     [0.0, 0.004, 0.006, 0.008, 0.01, 0.012, 0.016]):
         P = predict_strategy(Strategy.REPLAY, rc, rpt, seeds, base)
         L = loss(P)
         if verbose:
@@ -112,7 +121,12 @@ def format_table(pred: Cells) -> str:
         for T in SEQ_LENS:
             sim_row, pap_row = [], []
             for p in FAILURE_RATES:
-                v = TABLE1[(strat, T)][0.0] if p == 0.0 else pred[(strat, T, p)]
+                if p == 0.0:
+                    v = TABLE1[(strat, T)][0.0]
+                elif (strat, T, p) not in pred:
+                    sim_row.append("       -"); continue
+                else:
+                    v = pred[(strat, T, p)]
                 sim_row.append(f"{v:8.2f}" if v is not None else "     DNF")
                 v = TABLE1[(strat, T)][p]
                 pap_row.append(f"{v:8.2f}" if v is not None else "     DNF")
@@ -123,7 +137,7 @@ def format_table(pred: Cells) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, default=30)
+    ap.add_argument("--seeds", type=int, default=200)
     ap.add_argument("--json", default=None, help="write fitted params + table here")
     args = ap.parse_args()
     base = base_costs_from_p0()

@@ -19,12 +19,15 @@ from .petals import STAGES, base_costs_from_p0
 
 
 def step_time_replay(T: int, p: float, h: float, h_tok: float, R: float, r: float) -> float:
-    """Expected seconds per token. Linear in p: S*h + S*p*(R + k*r), averaged over k."""
+    """Expected seconds per token, averaged over k. To first order S*h + S*p*(R + k*r).
+
+    Exactly: a hop is retried until it succeeds (1/(1-p) tries), each failed try costs a
+    recovery, and a recovery's replay send is itself retried until it succeeds.
+    """
     kbar = (T - 1) / 2
     hop = h + h_tok * kbar
-    # a replay send can itself fail; the geometric number of tries adds a 1/(1-p) factor
     recovery = (R + kbar * r) / (1 - p)
-    return STAGES * (hop + p * recovery)
+    return STAGES * (hop / (1 - p) + (p / (1 - p)) * recovery)
 
 
 def time_restart(T: int, p: float, h: float, h_tok: float, R: float,
@@ -60,7 +63,9 @@ def step_time_cacheless(T: int, p: float, fixed: float, per_tok: float, R: float
 
 
 def crossover_p(T: int) -> float:
-    """Where restart and replay cross: about one failure per generation, p*S*T = 1."""
+    """Rule of thumb for where restart and replay cross: one failure per generation,
+    p*S*T = 1. The exact crossing depends on R and on the two hop times; with the
+    fitted costs it sits slightly below this (about 1.5e-3 at T=128)."""
     return 1.0 / (STAGES * T)
 
 

@@ -28,7 +28,8 @@ def predict(R: float, a: float, b: float, seeds: int, base) -> Dict[Tuple[int, f
     out = {}
     for T, p in CELLS:
         cfg = config_for(Strategy.RESTART, T, p, reconnect_time=R, replay_per_token=0.0,
-                         base=base, restart_cost_per_token=a, restart_cost_per_token_sq=b)
+                         base=base, restart_cost_per_token=a, restart_cost_per_token_sq=b,
+                         time_budget=1e9)
         out[(T, p)] = run_many(cfg, Strategy.RESTART, seeds=seeds).mean_steps_per_s
     return out
 
