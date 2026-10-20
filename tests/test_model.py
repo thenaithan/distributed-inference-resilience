@@ -141,6 +141,33 @@ def test_degrade_cut_slows_without_failing_and_latency_aware_client_evicts():
     assert aware.finished and 0 <= aware.slow_evictions <= 4
 
 
+def test_dht_entries_die_with_their_holders_and_republish_restores_them():
+    from churnsim.model import Registry
+    import random
+    reg = Registry(dht_k=2)
+    rng = random.Random(0)
+    nodes = [reg.add(0, rng) for _ in range(4)]
+    for n in nodes:
+        reg.store(n, rng)
+    target = nodes[0]
+    for h in reg.holders[target.nid]:
+        reg.remove(h)
+    assert not reg.entry_alive(target) and target not in reg.discoverable(0)
+    reg.store(target, rng)                      # what the republisher does
+    assert reg.entry_alive(target) and target in reg.discoverable(0)
+
+
+def test_concurrent_clients_share_load_and_all_finish():
+    from churnsim.model import simulate_all
+    cfg = Config(stages=2, seq_len=100, replicas=1, hop_time=0.01, reconnect_time=0.1,
+                 replay_per_token=0.0001, clients=4, load_alpha=0.5, time_budget=100.0)
+    sts = simulate_all(cfg, Strategy.REPLAY)
+    assert len(sts) == 4 and all(st.finished for st in sts)
+    # one replica per stage, four clients: every hop runs at 1 + 0.5*3 = 2.5x
+    single = simulate(Config(**{**cfg.__dict__, "clients": 1}), Strategy.REPLAY).elapsed
+    assert all(2.2 * single < st.elapsed < 2.8 * single for st in sts)
+
+
 if __name__ == "__main__":
     import sys
     failed = 0

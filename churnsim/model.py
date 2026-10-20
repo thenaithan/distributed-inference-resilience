@@ -96,6 +96,21 @@ class Config:
     # slowed 10x or 100x is never replaced mid-session).
     slow_threshold: Optional[float] = None
 
+    # --- discovery held on the server nodes (Experiment 2b) --------------------------
+    # 0 = oracle registry (entries live outside the swarm). k > 0 = each node's entry is
+    # stored on k other live nodes, Kademlia-style, and is discoverable only while at
+    # least one holder is alive; nodes re-store their entry every republish_interval.
+    dht_k: int = 0
+    republish_interval: float = 60.0
+
+    # --- concurrent clients (Experiment 2b) ----------------------------------------
+    # M clients run generations on the same swarm. A hop on a node used by L clients
+    # costs (1 + load_alpha * (L - 1)) times its single-client time. Petals Table 3:
+    # 10 clients on 10 servers get 1.17 vs 1.65 steps/s alone, so alpha ≈ 0.045 with
+    # GPU batching; without batching alpha → 1.
+    clients: int = 1
+    load_alpha: float = 0.0
+
     # --- defender's cut (Experiment 2) ------------------------------------------
     cut: Optional["Cut"] = None
 
@@ -133,6 +148,8 @@ class Node:
     cached: int = 0
     # multiplier on this node's compute time (degrade cut)
     speed: float = 1.0
+    # number of clients currently routed through this node
+    load: int = 0
 
 
 class Registry:
@@ -142,11 +159,14 @@ class Registry:
     the chance a node joining after the cut gets an entry at all.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dht_k: int = 0) -> None:
         self.by_stage: Dict[int, List[Node]] = {}
         self._next = 0
         self.hidden: set = set()
         self.register_prob: float = 1.0
+        self.dht_k = dht_k
+        self.holders: Dict[int, List[Node]] = {}  # nid -> nodes holding its entry
+        self.entries_lost: int = 0
 
     def add(self, stage: int, rng: Optional[random.Random] = None) -> Node:
         n = Node(self._next, stage)
@@ -154,7 +174,21 @@ class Registry:
         self.by_stage.setdefault(stage, []).append(n)
         if self.register_prob < 1.0 and rng is not None and rng.random() >= self.register_prob:
             self.hidden.add(n.nid)
+        if self.dht_k > 0:
+            self.store(n, rng)
         return n
+
+    def store(self, n: Node, rng: Optional[random.Random]) -> None:
+        """(Re)publish n's entry onto dht_k live nodes other than itself."""
+        pool = [m for m in self.all_nodes() if m.alive and m is not n]
+        if rng is not None:
+            rng.shuffle(pool)
+        self.holders[n.nid] = pool[: self.dht_k] if pool else [n]
+
+    def entry_alive(self, n: Node) -> bool:
+        if self.dht_k == 0:
+            return True
+        return any(h.alive for h in self.holders.get(n.nid, []))
 
     def remove(self, n: Node) -> None:
         n.alive = False
@@ -167,7 +201,7 @@ class Registry:
 
     def discoverable(self, stage: int) -> List[Node]:
         """Live nodes the client can find through the discovery layer."""
-        return [n for n in self.live(stage) if n.nid not in self.hidden]
+        return [n for n in self.live(stage) if n.nid not in self.hidden and self.entry_alive(n)]
 
     def all_nodes(self) -> List[Node]:
         return [n for lst in self.by_stage.values() for n in lst]
@@ -256,6 +290,16 @@ def _joiner(sim: Sim, reg: Registry, stage: int, cfg: Config, rng: random.Random
             sim.process(_node_lifetime(sim, reg, n, cfg.leave_rate, rng))
 
 
+def _republisher(sim: Sim, reg: Registry, cfg: Config, rng: random.Random) -> Proc:
+    while True:
+        yield cfg.republish_interval
+        for n in reg.all_nodes():
+            if n.alive:
+                if not reg.entry_alive(n):
+                    reg.entries_lost += 1
+                reg.store(n, rng)
+
+
 def _cutter(sim: Sim, reg: Registry, cfg: Config, rng: random.Random, st: "Stats") -> Proc:
     cut = cfg.cut
     assert cut is not None
@@ -286,7 +330,7 @@ def _cutter(sim: Sim, reg: Registry, cfg: Config, rng: random.Random, st: "Stats
 # ---------------------------------------------------------------------------
 
 def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
-            rng: random.Random, st: Stats) -> Proc:
+            rng: random.Random, st: Stats, start_delay: float = 0.0) -> Proc:
     S, T, p = cfg.stages, cfg.seq_len, cfg.hop_failure_p
 
     known: Dict[int, tuple] = {}  # nid -> (node, last seen)
@@ -323,9 +367,19 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
             yield cfg.poll_interval
 
     chain: List[Optional[Node]] = [None] * S
+
+    def attach(stage: int, n: Node) -> None:
+        old = chain[stage]
+        if old is not None and old is not n:
+            old.load -= 1
+        if old is not n:
+            n.load += 1
+        chain[stage] = n
+
+    yield start_delay
     for s in range(S):
         yield from pick(s, None)
-        chain[s] = st._picked  # type: ignore[attr-defined]
+        attach(s, st._picked)  # type: ignore[attr-defined]
         chain[s].cached = 0
     remember([n for n in chain if n is not None])
 
@@ -340,7 +394,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
         else:
             cost = cfg.hop_time + k * cfg.hop_time_per_token
         nominal = cost
-        cost *= node.speed
+        cost *= node.speed * (1 + cfg.load_alpha * max(node.load - 1, 0))
         dead = not node.alive
         if dead and cfg.detect_time is not None:
             cost = cfg.detect_time
@@ -372,7 +426,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
         else:
             yield from pick(s, node)
             replacement = st._picked  # type: ignore[attr-defined]
-        chain[s] = replacement
+        attach(s, replacement)
         yield cfg.reconnect_time
 
         if strategy is Strategy.RESTART:
@@ -393,7 +447,8 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
                 if dead and cfg.detect_time is not None:
                     yield cfg.detect_time
                 else:
-                    yield k * cfg.replay_per_token * replacement.speed
+                    yield (k * cfg.replay_per_token * replacement.speed
+                           * (1 + cfg.load_alpha * max(replacement.load - 1, 0)))
                 st.replays += 1
                 st.replayed_tokens += k
                 st.replay_sizes.append(k)
@@ -408,34 +463,54 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
                 else:
                     yield from pick(s, replacement)
                     replacement = st._picked  # type: ignore[attr-defined]
-                    chain[s] = replacement
+                    attach(s, replacement)
                 yield cfg.reconnect_time
             # then fall through and retry hop s for token k+1
             assert k == 0 or chain[s].cached == k, "replacement cache not rebuilt"  # type: ignore[union-attr]
 
     st.finished = True
     st.elapsed = sim.now
+    for n in chain:
+        if n is not None:
+            n.load -= 1
 
 
-def simulate(cfg: Config, strategy: Strategy) -> Stats:
+def simulate_all(cfg: Config, strategy: Strategy) -> List[Stats]:
+    """Run cfg.clients clients on one swarm; returns one Stats per client."""
     rng = random.Random(cfg.seed)
     sim = Sim()
-    reg = Registry()
+    reg = Registry(dht_k=cfg.dht_k)
     for s in range(cfg.stages):
         for _ in range(cfg.replicas):
-            n = reg.add(s)
+            n = reg.add(s, rng)
             if cfg.leave_rate > 0:
                 sim.process(_node_lifetime(sim, reg, n, cfg.leave_rate, rng))
         if cfg.join_rate > 0:
             sim.process(_joiner(sim, reg, s, cfg, rng))
-    st = Stats()
+    if cfg.dht_k > 0:
+        for n in reg.all_nodes():       # initial entries stored once the population exists
+            reg.store(n, rng)
+        sim.process(_republisher(sim, reg, cfg, rng))
+    stats = [Stats() for _ in range(cfg.clients)]
     if cfg.cut is not None:
-        sim.process(_cutter(sim, reg, cfg, rng, st))
-    sim.process(_client(sim, cfg, strategy, reg, rng, st))
-    sim.run(until=cfg.time_budget, stop=lambda: st.finished)
-    if not st.finished:
-        st.elapsed = cfg.time_budget
-    return st
+        sim.process(_cutter(sim, reg, cfg, rng, stats[0]))
+    for i, st in enumerate(stats):
+        # stagger starts across one no-failure step so clients are not in lockstep
+        delay = 0.0 if i == 0 else rng.random() * cfg.stages * cfg.hop_time
+        sim.process(_client(sim, cfg, strategy, reg, rng, st, start_delay=delay))
+    sim.run(until=cfg.time_budget, stop=lambda: all(st.finished for st in stats))
+    for st in stats:
+        if not st.finished:
+            st.elapsed = cfg.time_budget
+    for st in stats[1:]:
+        st.tokens_at_cut = stats[0].tokens_at_cut
+        st.nodes_cut = stats[0].nodes_cut
+    return stats
+
+
+def simulate(cfg: Config, strategy: Strategy) -> Stats:
+    """Single-client view: client 0 of simulate_all."""
+    return simulate_all(cfg, strategy)[0]
 
 
 @dataclass

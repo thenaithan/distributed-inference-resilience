@@ -199,8 +199,22 @@ latency-aware router and spare replicas, to the full slowdown with Petals' routi
 
 ![extensions](out/extensions.png)
 
+The two structural omissions were tested next (`python -m churnsim.exp2b`,
+`out/exp2b.png`). **Discovery held on the server nodes** (Kademlia-style, k = 3)
+changes nothing: a node cut reaches discovery only as f^k, so the oracle registry was
+not hiding anything, and the registry cut above corresponds to an attack on the DHT
+protocol (eclipse, Sybil, poisoning) rather than on its hosts. **Concurrent clients**
+sharpen everything: with twenty clients and Petals-like batching, node cuts still heal
+but at 4.5 to 4.9× nominal, and an 80% discovery cut drops per-client completion from
+0.38 to 0.06, because load on the few discoverable replicas lengthens every generation
+and churn breaks more chains. Without batching, twenty clients lose a third of their
+requests to a plain node cut.
+
+![experiment 2b](out/exp2b.png)
+
 NOTES.md §5 has the derivations, the n = 10 comparison, and what remains unmodelled
-(a DHT that shares nodes with the servers, concurrent clients, Byzantine outputs).
+(Byzantine outputs; the cost of the DHT attacks the registry cut stands for;
+heavy-tailed lifetimes).
 
 ## Status
 
@@ -215,5 +229,5 @@ NOTES.md §5 has the derivations, the n = 10 comparison, and what remains unmode
 - [ ] drop or heavily re-seed the p·S·T ≪ 1 cells in the calibration loss
 - [x] Experiment 2: cut sweep (nodes / stage / registry × static / healthy / busy)
 - [x] Experiment 2 extensions: detection latency, client routing cache, degrade cut with three routing policies
-- [ ] Experiment 2b: DHT entries tied to server nodes; concurrent clients
+- [x] Experiment 2b: DHT entries tied to server nodes; concurrent clients
 - [ ] exponential retry backoff; heavy-tailed (Weibull) node lifetimes
