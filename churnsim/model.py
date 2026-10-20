@@ -79,9 +79,29 @@ class Config:
     cacheless_fixed: float = 0.043
     cacheless_per_token: float = 0.00046
 
+    # --- defender's cut (Experiment 2) ------------------------------------------
+    cut: Optional["Cut"] = None
+
     # --- bookkeeping -----------------------------------------------------------
     time_budget: float = 3600.0    # give up (DNF) beyond this many simulated seconds
     seed: int = 0
+
+
+@dataclass(frozen=True)
+class Cut:
+    """A simultaneous removal applied at `time` seconds into the run.
+
+    kind = "nodes":    each live node is removed independently with probability `amount`
+    kind = "stage":    every live node holding stage int(amount) is removed
+    kind = "registry": each node's discovery entry is lost with probability `amount`,
+                       and nodes joining afterwards register only with probability
+                       1 - amount. Live nodes keep serving; the client keeps using the
+                       nodes it is already connected to, but can only route to nodes it
+                       can discover. Removing discovery stops recovery, not inference.
+    """
+    time: float
+    kind: str
+    amount: float
 
 
 @dataclass
@@ -94,16 +114,24 @@ class Node:
 
 
 class Registry:
-    """Discovery layer: which live nodes hold which stage."""
+    """Discovery layer: which live nodes hold which stage.
+
+    `hidden` holds node ids whose entry was lost to a registry cut; `register_prob` is
+    the chance a node joining after the cut gets an entry at all.
+    """
 
     def __init__(self) -> None:
         self.by_stage: Dict[int, List[Node]] = {}
         self._next = 0
+        self.hidden: set = set()
+        self.register_prob: float = 1.0
 
-    def add(self, stage: int) -> Node:
+    def add(self, stage: int, rng: Optional[random.Random] = None) -> Node:
         n = Node(self._next, stage)
         self._next += 1
         self.by_stage.setdefault(stage, []).append(n)
+        if self.register_prob < 1.0 and rng is not None and rng.random() >= self.register_prob:
+            self.hidden.add(n.nid)
         return n
 
     def remove(self, n: Node) -> None:
@@ -114,6 +142,10 @@ class Registry:
 
     def live(self, stage: int) -> List[Node]:
         return [n for n in self.by_stage.get(stage, []) if n.alive]
+
+    def discoverable(self, stage: int) -> List[Node]:
+        """Live nodes the client can find through the discovery layer."""
+        return [n for n in self.live(stage) if n.nid not in self.hidden]
 
     def all_nodes(self) -> List[Node]:
         return [n for lst in self.by_stage.values() for n in lst]
@@ -132,6 +164,8 @@ class Stats:
     wait_time: float = 0.0
     finished: bool = False
     elapsed: float = 0.0
+    tokens_at_cut: int = -1
+    nodes_cut: int = 0
 
     @property
     def steps_per_s(self) -> Optional[float]:
@@ -194,9 +228,30 @@ def _node_lifetime(sim: Sim, reg: Registry, node: Node, rate: float, rng: random
 def _joiner(sim: Sim, reg: Registry, stage: int, cfg: Config, rng: random.Random) -> Proc:
     while True:
         yield rng.expovariate(cfg.join_rate)
-        n = reg.add(stage)
+        n = reg.add(stage, rng)
         if cfg.leave_rate > 0:
             sim.process(_node_lifetime(sim, reg, n, cfg.leave_rate, rng))
+
+
+def _cutter(sim: Sim, reg: Registry, cfg: Config, rng: random.Random, st: "Stats") -> Proc:
+    cut = cfg.cut
+    assert cut is not None
+    yield cut.time
+    st.tokens_at_cut = st.tokens
+    if cut.kind == "nodes":
+        for n in reg.all_nodes():
+            if n.alive and rng.random() < cut.amount:
+                reg.remove(n); st.nodes_cut += 1
+    elif cut.kind == "stage":
+        for n in reg.live(int(cut.amount)):
+            reg.remove(n); st.nodes_cut += 1
+    elif cut.kind == "registry":
+        for n in reg.all_nodes():
+            if rng.random() < cut.amount:
+                reg.hidden.add(n.nid); st.nodes_cut += 1
+        reg.register_prob = 1.0 - cut.amount
+    else:
+        raise ValueError(cut.kind)
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +265,8 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
     def pick(stage: int, avoid: Optional[Node]) -> Proc:
         """Choose a live node for `stage`, waiting if there is none. Returns via st._picked."""
         while True:
-            cands = [n for n in reg.live(stage) if n is not avoid] or reg.live(stage)
+            found = reg.discoverable(stage)
+            cands = [n for n in found if n is not avoid] or found
             if cands:
                 st._picked = rng.choice(cands)  # type: ignore[attr-defined]
                 return
@@ -250,7 +306,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
         # --- failure on stage s ----------------------------------------------------
         st.failures += 1
         node.cached = 0
-        if node.alive and cfg.leave_rate == 0:
+        if node.alive and cfg.leave_rate == 0 and cfg.cut is None:
             # Petals-style "reset": the node is still there but its cache is gone.
             replacement = node
         else:
@@ -283,7 +339,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
                     replacement.cached = k
                     break
                 st.failures += 1
-                if replacement.alive and cfg.leave_rate == 0:
+                if replacement.alive and cfg.leave_rate == 0 and cfg.cut is None:
                     pass
                 else:
                     yield from pick(s, replacement)
@@ -309,6 +365,8 @@ def simulate(cfg: Config, strategy: Strategy) -> Stats:
         if cfg.join_rate > 0:
             sim.process(_joiner(sim, reg, s, cfg, rng))
     st = Stats()
+    if cfg.cut is not None:
+        sim.process(_cutter(sim, reg, cfg, rng, st))
     sim.process(_client(sim, cfg, strategy, reg, rng, st))
     sim.run(until=cfg.time_budget, stop=lambda: st.finished)
     if not st.finished:

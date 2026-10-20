@@ -149,6 +149,38 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
   128 tokens the fixed part dominates. For Experiment 2 both are levers, and under real
   churn the fixed part grows by the detection timeout (NOTES.md §4).
 
+## Experiment 2: how much do you have to remove? (`churnsim/cuts.py`)
+
+The same simulation read as a defender. A cut is applied 10 s into a 1024-token
+generation and we measure whether the request completes within 20× its no-failure
+time. Three cut types (a random fraction of nodes; every replica of one stage; a
+fraction of the discovery layer) under three swarm conditions (static; churn λ = 1e-3
+with joins balancing leaves; churn λ = 1e-2).
+
+```
+python -m churnsim.cuts --seeds 100                 # out/cuts.csv, out/cuts.png
+python -m churnsim.cuts --seeds 100 --replicas 10   # out/cuts_n10.*
+```
+
+![simultaneous cuts](out/cuts.png)
+
+- **Static swarm:** removal of a random fraction f of nodes follows (1 − fⁿ)^S exactly
+  (dashed), so with 3 replicas the request survives f = 0.3 nine times in ten and
+  f = 0.8 almost never; the targeted cut (all n replicas of one stage) stops it with n
+  nodes; and removing the entire discovery layer stops nothing, because a connected
+  chain does not need discovery.
+- **Churning swarm:** node cuts heal. Even removing every node leaves 93% (healthy) or
+  100% (busy) of requests completing, after a wait of about H_S / join_rate. The
+  registry cut becomes the effective one: with all of discovery gone, completion
+  requires the S chain nodes to outlive the rest of the generation,
+  P = exp(−S·λ·t_remaining), which is 0.71 (healthy) and 0.03 (busy) in closed form
+  against 0.63 and 0.07 measured, and is independent of the replica count. In the busy
+  swarm removing 80% of the discovery layer stops more requests than removing 100% of
+  the nodes.
+
+NOTES.md §5 has the derivations, the n = 10 comparison, and what is not modelled
+(client routing caches, DHT-node correlation, detection timeouts, concurrent clients).
+
 ## Status
 
 - [x] simulator with three strategies and both failure models
@@ -162,3 +194,5 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
 - [ ] drop or heavily re-seed the p·S·T ≪ 1 cells in the calibration loss
 - [ ] heavy-tailed (Weibull) node lifetimes in churn mode
 - [ ] `detect_time` and `registry_lag` in `Config` (NOTES.md §4); exponential retry backoff
+- [x] Experiment 2: cut sweep (nodes / stage / registry × static / healthy / busy)
+- [ ] Experiment 2 follow-ups: client-side routing cache, DHT entries tied to nodes, concurrent clients
