@@ -308,7 +308,7 @@ under real churn, and it is a client-side constant.
 discovered or used within that window, without the discovery layer. Under busy churn
 with the whole discovery layer removed, completion goes from 0.07 (knows only its
 chain) to 0.11 (60 s cache, Petals' refresh period) to 0.17 (remembers everything).
-At g = 0.8: 0.40 → 0.43 → 0.49. The cache softens the discovery cut by a few points,
+At g = 0.8: 0.38 → 0.42 → 0.48. The cache softens the discovery cut by a few points,
 not by a category: a remembered replica is only useful while it is alive, and in the
 busy swarm it is not alive for long. The claim "80% of discovery stops more requests
 than 100% of nodes" survives for every cache setting.
@@ -319,8 +319,8 @@ entirely on the client:
 
 | client                                          | f = 0.3 | f = 0.5 | f = 0.8 | f = 1.0 |
 |-------------------------------------------------|---------|---------|---------|---------|
-| never evicts slow nodes (Petals)                | 3.1×    | 4.8×    | 7.3×    | 9.1×    |
-| naive: evict any hop slower than 3× nominal     | 3.2×†   | 9.2×†   | 19×†    | DNF     |
+| never evicts slow nodes (Petals)                | 3.1×    | 4.8×    | 7.2×    | 9.1×    |
+| naive: evict any hop slower than 3× nominal     | 3.2×†   | 9.1×†   | 19×†    | DNF     |
 | latency-aware: evict only if a faster node is known | 1.4× | 2.2×    | 5.3×    | 9.1×    |
 
 (mean completion time over nominal, unfinished runs at the 20× deadline; † some runs
@@ -353,9 +353,11 @@ on three other nodes and is discoverable only while one of them is alive; nodes
 republish every 60 s (also tested: 600 s and never). A node cut then also destroys the
 entries whose holders all died, a fraction f³ of the survivors' entries.
 
-Result: almost nothing changes. Static swarm, node cut: P(complete) moves from 0.48 to
-0.46 at f = 0.5 and from 0.04 to 0.02 at f = 0.8, with no republishing at all. Busy
-swarm: completion stays at 1.0 and time-to-complete moves by under 10%. The reason is
+Result: almost nothing changes. Static swarm, node cut, 100 seeds: P(complete) moves
+from 0.58 to 0.48 at f = 0.5 and from 0.07 to 0.02 at f = 0.8, with no republishing at
+all. Busy swarm: completion stays at 1.0 and time-to-complete rises by 7 to 16%, half
+of which is already present with no cut at all (1.90× → 2.10× at f = 0: ordinary
+holder churn makes entries flicker). The reason is
 arithmetic: to lose an entry you must kill all k of its holders, so the discovery
 damage from a node cut is f^k, which at k = 3 is small until f is large, and by then
 the node cut itself has done the work. libp2p's Kademlia uses k = 20; hivemind's DHT
@@ -373,30 +375,32 @@ says nothing about how hard they are.
 **(b) Concurrent clients.** M clients run on the same swarm; a node serving L clients
 runs (1 + α·(L − 1)) times slower, with α = 0.05 (Petals Table 3: 10 clients on 10
 servers get 1.17 vs 1.65 steps/s alone, so ~0.045 per client with GPU batching) and
-α = 0.3 (weak batching). Busy swarm, per-client outcomes, 50 runs for M ≤ 5 and 10
-runs × 20 clients for M = 20:
+α = 0.3 (weak batching). Busy swarm, per-client outcomes. Runs: 100 for M = 1,
+20 runs × 5 clients for M = 5, 10 runs × 20 clients for M = 20; clients within a run
+share one swarm and one cut, so the per-client samples are correlated and the
+effective sample size is nearer the run count.
 
 | cut            | M=1        | M=5, α=.05 | M=20, α=.05 | M=5, α=.3  | M=20, α=.3  |
 |----------------|------------|------------|-------------|------------|-------------|
-| nodes 50%      | 1.00, 2.5× | 1.00, 2.9× | 1.00, 4.5×  | 1.00, 4.7× | 0.60, 17×†  |
-| nodes 100%     | 1.00, 3.1× | 1.00, 4.1× | 1.00, 4.9×  | 1.00, 6.3× | 0.68, 18×†  |
-| stage          | 1.00, 2.4× | 1.00, 2.5× | 1.00, 4.6×  | 1.00, 4.8× | 0.72, 16×†  |
-| registry 80%   | 0.38, 16×† | 0.40, 14×† | 0.06, 19×†  | 0.00, DNF  | 0.00, DNF   |
-| registry 100%  | 0.08, 18×† | 0.00, DNF  | 0.00, DNF   | 0.00, DNF  | 0.00, DNF   |
+| nodes 50%      | 1.00, 2.5× | 1.00, 3.0× | 1.00, 4.3×  | 1.00, 5.3× | 0.65, 17×†  |
+| nodes 100%     | 1.00, 3.3× | 1.00, 3.4× | 1.00, 5.1×  | 1.00, 5.7× | 0.60, 17×†  |
+| stage          | 1.00, 2.4× | 1.00, 2.9× | 1.00, 3.8×  | 1.00, 5.0× | 0.70, 16×†  |
+| registry 80%   | 0.38, 15×† | 0.27, 16×† | 0.10, 19×†  | 0.15, 19×† | 0.00, DNF   |
+| registry 100%  | 0.07, 19×† | 0.01, 20×† | 0.00, DNF   | 0.00, DNF  | 0.00, DNF   |
 
 (P(complete), mean time over nominal; † unfinished clients at the 20× deadline.)
 
 Three things:
 
 - Node and stage cuts still heal with Petals-like batching (α = 0.05), but the heal
-  costs 20 clients 4.5 to 4.9× nominal instead of 2.4 to 3.1×, because the first
+  costs 20 clients 3.8 to 5.1× nominal instead of 2.4 to 3.3×, because the first
   joiner on an emptied stage receives all twenty of them.
 - The discovery cut gets much worse with load: at 80% removed, per-client completion
-  goes from 0.38 (one client) to 0.06 (twenty clients, α = 0.05), and to zero at any
-  M > 1 with α = 0.3. Fewer discoverable replicas means each one carries more clients,
+  goes from 0.38 (one client) to 0.27 (five) to 0.10 (twenty, α = 0.05), and to zero
+  at twenty clients with α = 0.3. Fewer discoverable replicas means each one carries more clients,
   which slows every generation, which lengthens t_remaining in exp(−S·λ·t), which
   loses more chains. Load is a third feedback loop alongside the two in §2 and §5(c).
-- Without batching (α = 0.3), twenty clients turn even a plain node cut into a 30 to
+- With weak batching (α = 0.3), twenty clients turn even a plain node cut into a 30 to
   40% loss: the swarm heals, but the few live nodes run 6.7× slower under the pile-on,
   generations take long enough for churn to break them again, and a third of clients
   never finish. This is the §2 cascade with load as the multiplier instead of

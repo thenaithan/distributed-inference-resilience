@@ -205,10 +205,10 @@ changes nothing: a node cut reaches discovery only as f^k, so the oracle registr
 not hiding anything, and the registry cut above corresponds to an attack on the DHT
 protocol (eclipse, Sybil, poisoning) rather than on its hosts. **Concurrent clients**
 sharpen everything: with twenty clients and Petals-like batching, node cuts still heal
-but at 4.5 to 4.9× nominal, and an 80% discovery cut drops per-client completion from
-0.38 to 0.06, because load on the few discoverable replicas lengthens every generation
-and churn breaks more chains. Without batching, twenty clients lose a third of their
-requests to a plain node cut.
+but at 3.8 to 5.1× nominal, and an 80% discovery cut drops per-client completion from
+0.38 to 0.10, because load on the few discoverable replicas lengthens every generation
+and churn breaks more chains. With weak batching, twenty clients lose 30 to 40% of
+their requests to a plain node cut.
 
 ![experiment 2b](out/exp2b.png)
 
