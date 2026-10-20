@@ -182,7 +182,7 @@ python -m churnsim.cuts --seeds 100 --replicas 10   # out/cuts_n10.*
   nodes; and removing the entire discovery layer stops nothing, because a connected
   chain does not need discovery.
 - **Churning swarm:** node cuts heal. Even removing every node leaves 93% (healthy) or
-  100% (busy) of requests completing, after a wait of about $H_S / \text{join\_rate}$. The
+  100% (busy) of requests completing, after a wait of about $H_S / \text{join rate}$. The
   registry cut becomes the effective one: with all of discovery gone, completion
   requires the $S$ chain nodes to outlive the rest of the generation,
   $P = e^{-S \lambda t_{\text{remaining}}}$, which is 0.71 (healthy) and 0.03 (busy) in closed form
@@ -240,7 +240,7 @@ Seven results were found that went further than the paper.
    stage of replicas ($n$ nodes); in this case the discovery layer can be removed
    entirely without effect, since the connected chain has no need for looking up new
    nodes as none ever leave. When the swarm is under churn with joins, the node cuts
-   can heal within about $H_S / \text{join\_rate}$. Losing discovery leaves every in-flight
+   can heal within about $H_S / \text{join rate}$. Losing discovery leaves every in-flight
    request to survive on its current chain, $P = e^{-S \lambda t}$, where $t$ is the time
    remaining in the generation. This is not dependent on the number of replicas in
    existence. At $\lambda = 10^{-2}$, more requests get stopped by removing 80% of the discovery
