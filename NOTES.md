@@ -67,12 +67,21 @@ every uncensored cell. The large misses are the two censored restart points at 1
 tokens (p = 1e-3 and 2e-3); at 2e-3 the formula says 0.03 steps/s, about 9 hours per
 run, so a 1-hour budget can only ever return an upper bound there.
 
-A note on seeds: an earlier 30-seed calibration (seeds 0..29) happened to draw ~18%
+A note on seeds. An earlier 30-seed calibration (seeds 0..29) happened to draw ~18%
 fewer failures than nominal on every 128-token cell, which made replay at 128/1e-2
 look like an exact match to the paper and inflated the fitted reconnect to 6 s. With
-200 seeds and no censoring the fit moved to the values quoted in the README. Lesson
-kept: never calibrate on fewer than a few hundred seeds, and check `observed_p`
-against nominal in the output.
+200 seeds and no censoring the fit moved to the values quoted in the README.
+
+The number of seeds is set by what each result has to resolve, and is stated with it:
+
+| use                                   | seeds | why                                                                 |
+|---------------------------------------|-------|---------------------------------------------------------------------|
+| calibration and hypothesis fits (§3)  | 200   | fitting a per-cell throughput to ~5%; a cell with ~0.5 failures per run needs ~100 failures in total; uncensored |
+| throughput sweeps (sweep, churn)      | 100   | curve shape and ~10% per point; censored points are flagged           |
+| completion probabilities (cuts)       | 100   | binomial standard error ≤ 0.05                                        |
+| tests                                 | 1–200 | whatever the assertion needs                                          |
+
+Always check `observed_p` against nominal in the sweep output.
 
 ## 2. Node churn: recovery time feeds back into failure rate
 
@@ -165,6 +174,18 @@ Currently they are in the loss with equal weight, which is wrong.
 
 Read from `src/petals/client/inference_session.py` and `routing/sequence_manager.py`
 at commit 22afba6 (Aug 2024). This is what the fitted C = 4.5 s + 8 ms/token stands for.
+
+The paper is from December 2023 and its Table 1 experiment may be older still (it uses
+BLOOM-7.1B and a "less mature implementation" of Algorithm 1), so the code read here
+postdates the measurements. Checked against `git log`: the mechanism (client-side
+`history`, replay in one request, immediate first retry, DHT refresh when a block has
+no server, ban-and-ignore-if-all-banned) has been in place since the client was
+written in Nov–Dec 2022 and is unchanged in substance since. The constants have
+moved: `ban_timeout` was 60 s for ten days in Dec 2022 and 15 s since;
+`request_timeout` was 30 s until Feb 2023 and 180 s since; `min_backoff = 1` and
+`update_period = 60` are original. All of those predate the paper, so the client
+described below is the one the paper's authors had. Whether Table 1 was measured with
+it or with an earlier research branch is not recoverable from the public repo.
 
 Per hop, `InferenceSession.step` tries the server; on any exception:
 

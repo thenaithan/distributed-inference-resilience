@@ -1,9 +1,19 @@
 # distributed-inference-resilience
 
 Experiments on how a large model running split across many machines copes with nodes
-failing and leaving, studied from the operator's and defender's side. The open
-questions come from the essay *Anatomy of an Asymmetric Persistence Mechanism*
-(naithanweigh.com/writing/asymmetric-persistence/).
+failing and leaving. The open questions come from the essay *Anatomy of an Asymmetric
+Persistence Mechanism* (naithanweigh.com/writing/asymmetric-persistence/), which asks
+how you would detect, contain and remove a model that runs as a swarm of pipeline
+stages on machines you do not control.
+
+The same measurements serve two readers. The **operator** runs the swarm and wants it
+to keep serving as nodes leave: this is the framing of systems like Petals, and
+Experiment 1 reproduces their fault-tolerance result in that framing. The **defender**
+wants a swarm they do not operate to stop serving, and asks what the smallest
+intervention is that achieves that: Experiment 2 reads the same simulation that way.
+Resilience for the first reader is cost-to-contain for the second, so one model
+answers both. Everything here is a simulation of a cooperative system; no model is
+evading anyone.
 
 ## Experiment 1: churn simulation (`churnsim/`)
 
