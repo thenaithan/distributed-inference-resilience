@@ -203,7 +203,92 @@ Two things the Table 1 experiment does not exercise, and that matter for churn:
 Both are one-parameter additions to `Config` (`detect_time`, `registry_lag`) and belong
 in Experiment 2's cut analysis rather than in the Table 1 calibration.
 
-## 5. Reading
+## 5. Experiment 2: how much do you have to remove?
+
+`churnsim/cuts.py`. A cut is applied 10 s into a 1024-token generation (replay
+strategy, 4 stages, 3 replicas per stage unless stated) and the question is whether
+the request completes within 20× its no-failure time (96 s), and how long it takes.
+100 seeds per point. Three cut types, three swarm conditions: static (nothing rejoins),
+healthy churn (λ = 1e-3, joins balance leaves, mean lifetime ~17 min) and busy churn
+(λ = 1e-2, mean lifetime ~100 s).
+
+### Static swarm: the graph answers it
+
+- **Random fraction f of nodes.** The request completes iff every stage keeps at least
+  one replica: P = (1 − fⁿ)^S. With n = 3, S = 4 that is 0.90 at f = 0.3, 0.59 at 0.5,
+  0.06 at 0.8. The simulation sits on this curve (test asserts it). With n = 10 the
+  knee moves to f ≈ 0.8 (0.66) and f = 0.9 gives 0.22. Replication buys a lot against
+  random removal, which is the Albert–Barabási error-tolerance result in a pipeline.
+- **Every replica of one stage.** n nodes, chosen. P = 0 by construction. The targeted
+  cut is n nodes where the random cut needs on the order of (1 − ε^(1/S))^(1/n) · S·n;
+  for n = 3 that is about 9 to 10 of 12 nodes to get below 10%.
+- **Discovery layer.** P = 1 at any g up to and including 1. A chain that is already
+  connected needs no discovery. Removing discovery does not stop inference, it stops
+  recovery.
+
+So in a static swarm the minimum simultaneous cut that stops a request is the
+targeted one: n nodes, all of one stage. That is the essay's containment question as
+a number, and it is small.
+
+### Churning swarm: the answer inverts
+
+With joins balancing leaves, nothing that removes nodes stops a request for long:
+
+- A 100% node cut in the healthy swarm completes 93% of the time (the rest hit the
+  20× deadline), after waiting ~15 min for one joiner per stage. In the busy swarm it
+  completes 100% of the time in ~3× nominal. A whole-stage cut heals the same way:
+  P = 1, cost 4.5× (healthy) or 2.4× (busy) nominal. The wait is about
+  E[max of S Exp(join_rate)] ≈ H_S / join_rate, 690 s at 3e-3 and 69 s at 3e-2.
+- The registry cut, which did nothing in the static swarm, is now the effective one.
+  Losing all of discovery in the healthy swarm drops completion to 0.63; in the busy
+  swarm to 0.07. Losing 80% of it gives 0.81 and 0.38. In the busy swarm, **removing
+  80% of the discovery layer stops more requests than removing 100% of the nodes.**
+
+The mechanism is the one §4 flagged: once discovery is gone, the client can keep using
+the chain it has but cannot replace a node that leaves, so completion requires the S
+chain nodes to outlive the remaining generation:
+
+    P(complete | g = 1) = exp(−S · λ · t_remaining)
+
+Healthy: exp(−4 × 1e-3 × 86) = 0.71 vs 0.63 measured. Busy: exp(−4 × 1e-2 × 86) = 0.03
+vs 0.07 (the busy generation also runs slower, lengthening t_remaining; the two effects
+roughly cancel). This is independent of the replica count n: with 10 replicas the
+healthy g = 1 result is 0.71 and the busy one 0.02. **Replication does not help against
+a discovery cut**, because the client cannot reach replicas it cannot find.
+
+Two asymmetries worth stating plainly:
+
+1. The busy swarm is *more* resilient to node removal (joins are faster) and *less*
+   resilient to discovery removal (its chain nodes die sooner). Churn rate flips which
+   cut is the minimum one.
+2. The node cut and the stage cut act instantly and heal; the registry cut acts slowly
+   and does not heal, because new joiners cannot register either. Its effect is a hazard
+   S·λ applied to every in-flight request from the cut onward, so its cost grows with
+   the length of the request and with how long the cut is held.
+
+For the defender's question this gives a ranking. Against a static deployment, take
+out one stage (n nodes). Against anything that self-heals, take out discovery, and the
+amount needed is set by the churn rate: at λ = 1e-3 even g = 1 leaves a third of
+requests completing, at λ = 1e-2 g ≈ 0.8 is enough to stop most. Both λ* from §2 and
+this result say the same thing from different sides: the discovery-and-detection path
+is where a distributed model is thinnest.
+
+### Not modelled, and relevant
+
+- Clients cache routing tables (Petals: `update_period = 60 s`) and could keep using
+  known-but-unregistered nodes. Our client knows only its current chain, which makes
+  the registry cut slightly more effective than it would be against Petals. The fix is
+  a `known` set per client with a staleness window; cheap to add.
+- The registry here is a single oracle with per-entry loss. A real DHT loses entries
+  as a function of which nodes are removed, so a node cut and a registry cut are
+  correlated; "remove fraction g of the DHT" is a lower bound on the damage a node
+  cut does to discovery. In Petals the DHT runs on the same hivemind peers as the
+  servers.
+- Detection latency is one hop time (the lost node is noticed on the next send). With
+  a 180 s timeout the registry-cut hazard is unchanged but every heal takes longer.
+- One request, one client. Many concurrent clients contend for the same joiners.
+
+## 6. Reading
 
 1. Ross, *Introduction to Probability Models*, ch. 7, Renewal Theory. The
    renewal-reward theorem is the basis of every expected-time-per-step line above.

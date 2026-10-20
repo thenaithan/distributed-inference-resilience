@@ -72,6 +72,32 @@ def test_summary_censoring_uses_budget_for_unfinished_runs():
     assert s_all_dnf.mean_steps_per_s is None and not s_all_dnf.censored
 
 
+def _cut_cfg(kind, amount, lam=0.0, join=0.0, seed=0):
+    from churnsim.model import Cut
+    return Config(stages=4, seq_len=256, replicas=3, hop_time=0.0217, reconnect_time=4.5,
+                  replay_per_token=0.008, leave_rate=lam, join_rate=join, poll_interval=0.5,
+                  time_budget=400.0, cut=Cut(time=5.0, kind=kind, amount=amount), seed=seed)
+
+
+def test_static_node_cut_matches_closed_form():
+    from churnsim.cuts import static_p_complete
+    n = 200
+    done = sum(simulate(_cut_cfg("nodes", 0.5, seed=i), Strategy.REPLAY).finished for i in range(n))
+    assert abs(done / n - static_p_complete("nodes", 0.5, 4, 3)) < 0.1
+
+
+def test_stage_cut_stops_without_joins_and_heals_with():
+    st = simulate(_cut_cfg("stage", 1), Strategy.REPLAY)
+    assert not st.finished and st.nodes_cut == 3
+    st = simulate(_cut_cfg("stage", 1, lam=1e-3, join=3e-2), Strategy.REPLAY)
+    assert st.finished and st.waits > 0
+
+
+def test_registry_cut_alone_does_not_stop_inflight_request():
+    st = simulate(_cut_cfg("registry", 1.0), Strategy.REPLAY)
+    assert st.finished and st.nodes_cut == 12 and st.waits == 0
+
+
 if __name__ == "__main__":
     import sys
     failed = 0

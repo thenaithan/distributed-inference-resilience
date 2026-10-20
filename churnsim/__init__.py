@@ -5,4 +5,4 @@ Table 1 / Appendix F): sequential token generation through a pipeline of stages 
 each hop fails with probability p, compared across three recovery strategies.
 """
 
-from .model import Config, Strategy, simulate, run_many  # noqa: F401
+from .model import Config, Cut, Strategy, simulate, run_many  # noqa: F401
