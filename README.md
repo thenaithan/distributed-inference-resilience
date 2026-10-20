@@ -188,8 +188,19 @@ python -m churnsim.cuts --seeds 100 --replicas 10   # out/cuts_n10.*
   swarm removing 80% of the discovery layer stops more requests than removing 100% of
   the nodes.
 
-NOTES.md §5 has the derivations, the n = 10 comparison, and what is not modelled
-(client routing caches, DHT-node correlation, detection timeouts, concurrent clients).
+Three omissions were then tested (`python -m churnsim.extensions --seeds 100`,
+`out/extensions.png`): **detection latency** (Petals' 180 s timeout moves the cascade
+threshold λ* from 0.029 to 1.3e-3 /s, as 1/(S·C) predicts), a **client routing cache**
+(softens the discovery cut by a few points; the claim above survives at every cache
+setting), and a **compute attack** in which nodes are slowed 10× but stay registered:
+its effect is set entirely by the client's routing, from near zero with a
+latency-aware router and spare replicas, to the full slowdown with Petals' routing
+(which only re-routes on failure), to a cascade with a naive slow-node evictor.
+
+![extensions](out/extensions.png)
+
+NOTES.md §5 has the derivations, the n = 10 comparison, and what remains unmodelled
+(a DHT that shares nodes with the servers, concurrent clients, Byzantine outputs).
 
 ## Status
 
@@ -202,7 +213,7 @@ NOTES.md §5 has the derivations, the n = 10 comparison, and what is not modelle
 - [x] restart cost proportional to tokens generated before failure: tested linear and
       quadratic, neither fits all five cells (NOTES.md §3); left as fixed R, still open
 - [ ] drop or heavily re-seed the p·S·T ≪ 1 cells in the calibration loss
-- [ ] heavy-tailed (Weibull) node lifetimes in churn mode
-- [ ] `detect_time` and `registry_lag` in `Config` (NOTES.md §4); exponential retry backoff
 - [x] Experiment 2: cut sweep (nodes / stage / registry × static / healthy / busy)
-- [ ] Experiment 2 follow-ups: client-side routing cache, DHT entries tied to nodes, concurrent clients
+- [x] Experiment 2 extensions: detection latency, client routing cache, degrade cut with three routing policies
+- [ ] Experiment 2b: DHT entries tied to server nodes; concurrent clients
+- [ ] exponential retry backoff; heavy-tailed (Weibull) node lifetimes

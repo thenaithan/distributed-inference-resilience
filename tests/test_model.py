@@ -98,6 +98,49 @@ def test_registry_cut_alone_does_not_stop_inflight_request():
     assert st.finished and st.nodes_cut == 12 and st.waits == 0
 
 
+def test_detect_time_replaces_hop_cost_for_dead_nodes():
+    # every failure under churn is a send to a node that has left; with detect_time set
+    # each one must cost at least detect_time
+    cfg = Config(stages=2, seq_len=300, replicas=3, hop_time=0.01, reconnect_time=0.1,
+                 replay_per_token=0.0001, leave_rate=0.05, join_rate=0.15,
+                 detect_time=7.0, time_budget=1000.0, seed=1)
+    st = simulate(cfg, Strategy.REPLAY)
+    assert st.finished and st.failures >= 1
+    assert st.elapsed >= 7.0 * st.failures
+
+
+def test_known_window_lets_client_route_without_registry():
+    # registry gone, chain node leaves; with a cache the client still finds the others
+    from churnsim.model import Cut
+    base = dict(stages=1, seq_len=50, replicas=3, hop_time=0.01, reconnect_time=0.1,
+                replay_per_token=0.001, leave_rate=0.0, time_budget=30.0,
+                cut=Cut(time=0.05, kind="registry", amount=1.0))
+    # force the chain node to die: give it a lifetime via leave_rate on a single node is
+    # awkward, so instead remove it with a second mechanism: hop failure p>0 reroutes
+    # (cut is not None so a p-failure picks a new node rather than reconnecting)
+    st0 = simulate(Config(hop_failure_p=0.2, known_window=0.0, **base), Strategy.REPLAY)
+    st1 = simulate(Config(hop_failure_p=0.2, known_window=1e9, **base), Strategy.REPLAY)
+    assert not st0.finished and st0.waits > 0      # nothing discoverable, stalls
+    assert st1.finished and st1.waits == 0         # remembered replicas still usable
+
+
+def test_degrade_cut_slows_without_failing_and_latency_aware_client_evicts():
+    from churnsim.model import Cut
+    base = dict(stages=2, seq_len=100, replicas=3, hop_time=0.01, reconnect_time=0.05,
+                replay_per_token=0.0001, time_budget=100.0, seed=3,
+                cut=Cut(time=0.1, kind="degrade", amount=1.0, factor=10.0))
+    plain = simulate(Config(**base), Strategy.REPLAY)
+    assert plain.finished and plain.failures == 0 and plain.slow_evictions == 0
+    assert plain.elapsed > 5 * (100 * 2 * 0.01)   # at least ~10x slower after the cut
+    # all nodes slowed: a latency-aware client has nowhere better to go, so no evictions
+    aware = simulate(Config(routing="min_latency", slow_threshold=3.0, **base), Strategy.REPLAY)
+    assert aware.slow_evictions == 0
+    # half slowed: it evicts at most a few times and ends up on fast nodes
+    base["cut"] = Cut(time=0.1, kind="degrade", amount=0.5, factor=10.0)
+    aware = simulate(Config(routing="min_latency", slow_threshold=3.0, **base), Strategy.REPLAY)
+    assert aware.finished and 0 <= aware.slow_evictions <= 4
+
+
 if __name__ == "__main__":
     import sys
     failed = 0

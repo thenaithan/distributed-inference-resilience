@@ -79,6 +79,23 @@ class Config:
     cacheless_fixed: float = 0.043
     cacheless_per_token: float = 0.00046
 
+    # --- detection, routing, client memory (Experiment 2 extensions) ----------------
+    # Time to notice that the node a hop was sent to has left. None = one hop time
+    # (the send fails as fast as a normal send). Petals detects a silent crash by
+    # request_timeout, 180 s.
+    detect_time: Optional[float] = None
+    # The client remembers nodes it has discovered or used within this many seconds
+    # and can route to them without the discovery layer (Petals refreshes its routing
+    # table every 60 s and keeps using what it has). 0 = knows only its current chain.
+    known_window: float = 0.0
+    # "random": pick any discoverable replica. "min_latency": pick the fastest known
+    # (Petals routes by measured latency).
+    routing: str = "random"
+    # A hop slower than this multiple of its nominal time counts as a failure and the
+    # client re-routes. None = never (Petals: only request_timeout, 180 s, so a node
+    # slowed 10x or 100x is never replaced mid-session).
+    slow_threshold: Optional[float] = None
+
     # --- defender's cut (Experiment 2) ------------------------------------------
     cut: Optional["Cut"] = None
 
@@ -98,10 +115,13 @@ class Cut:
                        1 - amount. Live nodes keep serving; the client keeps using the
                        nodes it is already connected to, but can only route to nodes it
                        can discover. Removing discovery stops recovery, not inference.
+    kind = "degrade":  each live node is slowed by `factor` with probability `amount`.
+                       It stays alive and registered. The compute attack.
     """
     time: float
     kind: str
     amount: float
+    factor: float = 10.0
 
 
 @dataclass
@@ -111,6 +131,8 @@ class Node:
     alive: bool = True
     # tokens of this client's session currently in the node's KV cache
     cached: int = 0
+    # multiplier on this node's compute time (degrade cut)
+    speed: float = 1.0
 
 
 class Registry:
@@ -166,6 +188,7 @@ class Stats:
     elapsed: float = 0.0
     tokens_at_cut: int = -1
     nodes_cut: int = 0
+    slow_evictions: int = 0
 
     @property
     def steps_per_s(self) -> Optional[float]:
@@ -250,6 +273,10 @@ def _cutter(sim: Sim, reg: Registry, cfg: Config, rng: random.Random, st: "Stats
             if rng.random() < cut.amount:
                 reg.hidden.add(n.nid); st.nodes_cut += 1
         reg.register_prob = 1.0 - cut.amount
+    elif cut.kind == "degrade":
+        for n in reg.all_nodes():
+            if n.alive and rng.random() < cut.amount:
+                n.speed = cut.factor; st.nodes_cut += 1
     else:
         raise ValueError(cut.kind)
 
@@ -262,13 +289,34 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
             rng: random.Random, st: Stats) -> Proc:
     S, T, p = cfg.stages, cfg.seq_len, cfg.hop_failure_p
 
+    known: Dict[int, tuple] = {}  # nid -> (node, last seen)
+
+    def remember(nodes: List[Node]) -> None:
+        if cfg.known_window > 0:
+            for n in nodes:
+                known[n.nid] = (n, sim.now)
+
+    def candidates(stage: int) -> List[Node]:
+        found = reg.discoverable(stage)
+        remember(found)
+        if cfg.known_window > 0:
+            recalled = [n for n, t in known.values()
+                        if n.stage == stage and n.alive and sim.now - t <= cfg.known_window]
+            found = list({n.nid: n for n in found + recalled}.values())
+        return found
+
     def pick(stage: int, avoid: Optional[Node]) -> Proc:
         """Choose a live node for `stage`, waiting if there is none. Returns via st._picked."""
         while True:
-            found = reg.discoverable(stage)
+            found = candidates(stage)
             cands = [n for n in found if n is not avoid] or found
             if cands:
-                st._picked = rng.choice(cands)  # type: ignore[attr-defined]
+                if cfg.routing == "min_latency":
+                    rng.shuffle(cands)
+                    st._picked = min(cands, key=lambda n: n.speed)  # type: ignore[attr-defined]
+                else:
+                    st._picked = rng.choice(cands)  # type: ignore[attr-defined]
+                remember([st._picked])  # type: ignore[attr-defined]
                 return
             st.waits += 1
             st.wait_time += cfg.poll_interval
@@ -279,6 +327,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
         yield from pick(s, None)
         chain[s] = st._picked  # type: ignore[attr-defined]
         chain[s].cached = 0
+    remember([n for n in chain if n is not None])
 
     k = 0  # tokens whose KV is established on every stage (session length so far)
     s = 0
@@ -290,10 +339,21 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
             cost = cfg.cacheless_fixed + (k + 1) * cfg.cacheless_per_token
         else:
             cost = cfg.hop_time + k * cfg.hop_time_per_token
+        nominal = cost
+        cost *= node.speed
+        dead = not node.alive
+        if dead and cfg.detect_time is not None:
+            cost = cfg.detect_time
         yield cost
         st.hops += 1
 
-        failed = (not node.alive) or (p > 0 and rng.random() < p)
+        too_slow = cfg.slow_threshold is not None and cost > cfg.slow_threshold * nominal
+        if too_slow and cfg.routing == "min_latency":
+            # a latency-aware router only switches when it knows somewhere faster
+            too_slow = any(n.speed < node.speed for n in candidates(s) if n is not node)
+        if too_slow:
+            st.slow_evictions += 1
+        failed = dead or too_slow or (p > 0 and rng.random() < p)
         if not failed:
             node.cached = k + 1
             s += 1
@@ -306,7 +366,7 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
         # --- failure on stage s ----------------------------------------------------
         st.failures += 1
         node.cached = 0
-        if node.alive and cfg.leave_rate == 0 and cfg.cut is None:
+        if node.alive and cfg.leave_rate == 0 and cfg.cut is None and not too_slow:
             # Petals-style "reset": the node is still there but its cache is gone.
             replacement = node
         else:
@@ -329,12 +389,16 @@ def _client(sim: Sim, cfg: Config, strategy: Strategy, reg: Registry,
             # client-side cache. The replay send is itself a send and can fail (w.p. p),
             # and the node can leave mid-replay, in which case we pick again.
             while k > 0:
-                yield k * cfg.replay_per_token
+                dead = not replacement.alive
+                if dead and cfg.detect_time is not None:
+                    yield cfg.detect_time
+                else:
+                    yield k * cfg.replay_per_token * replacement.speed
                 st.replays += 1
                 st.replayed_tokens += k
                 st.replay_sizes.append(k)
                 st.hops += 1
-                replay_failed = (not replacement.alive) or (p > 0 and rng.random() < p)
+                replay_failed = dead or (p > 0 and rng.random() < p)
                 if not replay_failed:
                     replacement.cached = k
                     break
