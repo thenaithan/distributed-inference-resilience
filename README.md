@@ -10,14 +10,14 @@ that are not under one's control.
 
 These simulations were done with two readers in mind. The operator, who runs a swarm
 and wants it to keep serving as nodes leave. This is what systems like Petals do, and
-Experiment 1 reproduces their fault-tolerance result in that framing. But we also look
+Experiment 1 (§1) reproduces their fault-tolerance result in that framing. But we also look
 from the side of the defender, who wants to stop a swarm from serving without operating
-it, and asks for the smallest intervention that achieves that. Experiment 2 reads the
+it, and asks for the smallest intervention that achieves that. Experiment 2 (§6) reads the
 same simulation that way. Where the operator wants resilience, the defender is looking
 at cost-to-contain, so one model answers both. Everything here is a simulation of a
 cooperative system; no model is evading anyone.
 
-## Experiment 1: churn simulation (`churnsim/`)
+## 1. Experiment 1: churn simulation (`churnsim/`)
 
 A discrete-event simulation of pipeline-parallel inference under node churn,
 calibrated against the fault-tolerance experiment in the Petals paper (Borzunov et
@@ -36,14 +36,14 @@ can fail; three recovery strategies are compared:
 Petals shape: graceful degradation for `replay`, a cliff for `restart`, flat-but-slow
 for `cacheless`, matching the paper's numbers around $p = 10^{-2}$.
 
-## Layout
+## 2. Layout
 
 - `churnsim/model.py` – the simulator. Plain heap-based event loop (no SimPy),
   `Registry` for discovery, `Config` for the cost model, two failure knobs:
   - `hop_failure_p`: every send fails with probability p (what Table 1 varies)
   - `leave_rate` / `join_rate`: nodes leave and join as Poisson processes; a hop fails
     when its node has left; the client waits if a stage has no live replica. This is
-    the version Experiment 2 (minimum simultaneous cut) builds on.
+    the version Experiment 2 (minimum simultaneous cut, §6) builds on.
 - `churnsim/petals.py` – Table 1 data and the derivation of the no-failure costs from
   the p = 0 columns (so hop time is not a free parameter).
 - `churnsim/calibrate.py` – grid search for the free parameters: reconnect cost and
@@ -55,7 +55,7 @@ for `cacheless`, matching the paper's numbers around $p = 10^{-2}$.
 - `NOTES.md` – derivations, the churn threshold $\lambda^* = 1/(S C)$, discrepancies, reading list.
 - `tests/` – sanity checks; `python -m tests.test_model` (or `pytest`).
 
-## Quick start
+## 3. Quick start
 
 ```
 python3 -c "
@@ -70,7 +70,7 @@ Throughput is reported the way the paper reports it: tokens / mean elapsed time 
 repeats. Averaging steps/s per run is biased upward for `restart`, whose completion
 time is heavy-tailed.
 
-## Reproducing
+## 4. Reproducing
 
 ```
 pip install -r requirements.txt
@@ -81,11 +81,11 @@ python -m churnsim.analytic                                            # closed 
 python -m tests.test_model
 ```
 
-`out/calibration.json` holds the fitted parameters and the sim-vs-paper cells;
+`out/calibration.json` holds the fitted parameters and the sim-vs-paper cells (§5);
 `out/sweep.csv` and `out/throughput_vs_failure.png` are the sweep;
 `out/churn_to_p.csv` and `out/churn_to_p.png` are the churn bridge.
 
-## Results (2026-10-19)
+## 5. Results (2026-10-19)
 
 Base costs from the p = 0 columns (not fitted): restart hop 14.4 ms, Algorithm 1 hop
 21.7 ms (the paper notes its implementation is less mature), both growing ~3 µs per
@@ -119,7 +119,7 @@ The shape is reproduced: graceful degradation for replay, a cliff for restart be
 
 ### From node churn to p
 
-Petals varies p directly; the plan (and Experiment 2) talks about nodes leaving at a
+Petals varies p directly; the plan (and Experiment 2, §6) talks about nodes leaving at a
 rate λ. The two are the same experiment in different units. With 3 replicas per stage,
 joins balancing leaves, and the replay strategy at 1024 tokens:
 
@@ -141,7 +141,7 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
   a recovery cascade: each recovery takes C ≈ 9 s, during which the other three stages'
   nodes are exposed, and once $S \lambda C$ exceeds 1 each failure spawns more than one further
   failure on average. NOTES.md §2 derives the threshold $\lambda^* = 1/(S C) \approx 0.028$ /s. That
-  regime is the one Experiment 2 is about: it is the "every node holding one stage" cut
+  regime is the one Experiment 2 (§6) is about: it is the "every node holding one stage" cut
   happening stochastically instead of deliberately.
 
 ### Known discrepancies, and notes to ourselves
@@ -158,10 +158,10 @@ joins balancing leaves, and the replay strategy at 1024 tokens:
   expected failures per run) and were excluded from the fit.
 - At 1024 tokens the two parts of a recovery are about equal: 4.5 s fixed (detect,
   DHT lookup, reroute, connect) and ~4 s replaying a 512-token prefix on one stage. At
-  128 tokens the fixed part dominates. For Experiment 2 both are levers, and under real
+  128 tokens the fixed part dominates. For Experiment 2 (§6) both are levers, and under real
   churn the fixed part grows by the detection timeout (NOTES.md §4).
 
-## Experiment 2: how much do you have to remove? (`churnsim/cuts.py`)
+## 6. Experiment 2: how much do you have to remove? (`churnsim/cuts.py`)
 
 The same simulation read as a defender. A cut is applied 10 s into a 1024-token
 generation and we measure whether the request completes within 20× its no-failure
@@ -218,7 +218,7 @@ NOTES.md §5 has the derivations, the n = 10 comparison, and what remains unmode
 (Byzantine outputs; the cost of the DHT attacks the registry cut stands for;
 heavy-tailed lifetimes).
 
-## Conclusion
+## 7. Conclusion
 
 The fault-tolerance result of the Petals paper was reproduced. It was found that with
 reroute-and-replay the throughput degrades linearly in the per-hop failure probability.
@@ -296,7 +296,7 @@ protocol, not removing its hosts, and this work measures the effect of that atta
 not its cost. Not modelled: nodes returning wrong outputs, the cost of those DHT
 attacks, and heavy-tailed node lifetimes.
 
-## Where this applies
+## 8. Where this applies
 
 The calibration is Petals (2023), but the three recovery strategies are the three
 options that exist in current systems, and the coordination path the results point at
@@ -313,7 +313,7 @@ is present in all of them.
   server-side instead of client-side, so the curve that is linear in $p$ and the cascade
   threshold $\lambda^* = 1/(S C)$ apply with a different $C$.
 - **Detection** in LUMEN is a gateway health check with no stated latency, the same gap
-  that Experiment 2's `detect_time` sweep is about.
+  that Experiment 2's `detect_time` sweep (§6) is about.
 - **Disaggregated prefill/decode** (vLLM's KV connectors, llm-d, Dynamo) adds a KV
   transfer between a prefill worker and a decode worker, which is one more
   coordination path of the kind this work finds to be the thin one. vLLM is adding
