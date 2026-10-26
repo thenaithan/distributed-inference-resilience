@@ -417,7 +417,48 @@ So concurrency sharpens every result, and most of all the discovery one.
   poisoning) are not modelled; the model gives their effect, not their cost.
 - Node lifetimes are exponential; measured P2P session lengths are heavy-tailed.
 
-## 6. Reading
+## 6. Measured constants (Experiment 3)
+
+Experiment 3 (`distributed-inference-recovery`) measured what one node failure costs a
+request on exo, vLLM and llama.cpp's RPC backend, on one CPU host, 107 trials.
+`python -m churnsim.measured` applies the closed forms of §1 and §2 to those numbers.
+
+| system | failure | detect | C (failure → first token of the resubmitted request) |
+|---|---|---|---|
+| exo, worker | crash, hang or partition: identical | 15 s (the master's silence clock) | 275 s, of which warmup 168 s, prefill 85 s |
+| exo, master | any | 3.3 / 13.2 / 30 s, one of three paths | 290 to 305 s |
+| vLLM PP=2 | worker crash | 1.5 s | 67 s (relaunch 62 s) |
+| vLLM PP=2 | worker hang | 300 s (`VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS`) | 373 s |
+| llama.cpp RPC | rpc host crash | 0.5 s | 14 s |
+| llama.cpp RPC | rpc host hang or partition | never | never, or ~950 s with probability ~½ after a partition |
+
+All three are the `restart` strategy of §1 and none re-places or relaunches anything by
+itself. What the numbers do to the model:
+
+- **λ* = 1/(S·C) is moot for them**, because they have no replay to cascade; it would
+  apply only if they adopted Petals' mechanism, and then the measured C puts the
+  threshold at a mean node lifetime of 14 min (exo), 2 to 12 min (vLLM) and 30 s
+  (llama.cpp, crash). Under a hang, llama.cpp has no threshold at all: every hang is
+  permanent.
+- **For restart, the quantity that matters is $(1-p)^{ST}$, i.e. $e^{-N\lambda D}$ for a
+  request of duration D over N nodes.** A 15-node replica completing a 30-hour window
+  (the Frontier Red Team article's setting) nine times in ten needs a mean device
+  lifetime of 178 days; at a 7-day lifetime it completes 7% of the time and the expected
+  wall time is 437 hours; at 1 day it never completes.
+- **With replay recovery the same window is cheap**: at a 7-day lifetime, 2.7 expected
+  failures costing 0.2 h at exo's C, 0.01 h at llama.cpp's. The difference between
+  "replica never finishes" and "replica loses twelve minutes" is the recovery mechanism,
+  not the hardware, and no current stack ships it.
+- **Detection is bimodal in the two systems with a detector, and absent in the third.**
+  vLLM: 1.5 s vs 300 s. exo: a single 15 s timer for workers regardless of failure shape,
+  and a 3.3 / 13.2 / 30 s lottery for the master. llama.cpp: 0.5 s on a TCP reset, never
+  otherwise. §5's finding that a node which is present but not answering is the worst
+  case is now measured on all three.
+- **The prefill/decode ratio on CPU is 7 to 10** (llama.cpp, batched backend), between
+  exo's MLX ≈ 1 and the article's derived ≈ 15. The regime restatement in Experiment 3
+  uses this measured constant.
+
+## 7. Reading
 
 1. Ross, *Introduction to Probability Models*, ch. 7, Renewal Theory. The
    renewal-reward theorem is the basis of every expected-time-per-step line above.

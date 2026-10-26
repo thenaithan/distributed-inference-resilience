@@ -324,8 +324,14 @@ is present in all of them.
   consumer devices. Discovery plus pipeline plus some recovery policy is the shape of
   all of them.
 
-What a modern stack changes is the numbers in $C$, not the structure. Measuring $C$ on
-one of these stacks is scheduled as a next experiment.
+What a modern stack changes is the numbers in $C$, not the structure. Experiment 3
+([distributed-inference-recovery](https://github.com/thenaithan/distributed-inference-recovery))
+measured $C$ on exo, vLLM and llama.cpp's RPC backend: all three restart the request
+from scratch and none re-places anything by itself; detection is 15 s (exo, any failure
+shape), 1.5 s or 300 s (vLLM, crash or hang) and 0.5 s or never (llama.cpp, reset or
+anything else); $C$ is 275 s, 67 to 373 s and 14 s on one CPU host. `python -m
+churnsim.measured` applies the closed forms above to those numbers; NOTES.md §6 has the
+table and what it implies.
 
 References: [LUMEN, arXiv:2606.17787](https://arxiv.org/abs/2606.17787);
 [vLLM PR #56430, KV-transfer fault tolerance](https://github.com/vllm-project/vllm/pull/56430);
